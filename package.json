@@ -1,0 +1,15 @@
+{
+  "name": "watten-power-webapp",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Watten Power Ltd - Sales CRM & Job Management Platform (prototype)",
+  "scripts": {
+    "install:all": "npm install && npm --prefix server install && npm --prefix client install",
+    "seed": "npm --prefix server run seed",
+    "dev": "concurrently -n API,WEB -c blue,green \"npm --prefix server run dev\" \"npm --prefix client run dev\"",
+    "start": "npm --prefix server start"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}
