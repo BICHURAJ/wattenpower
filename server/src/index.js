@@ -7,6 +7,7 @@ import { connectDB } from './db.js'
 import apiRoutes from './routes/index.js'
 import Lead from './models/Lead.js'
 import Activity from './models/Activity.js'
+import { clearUnlinkedQuoteSteps } from './quoteProgress.js'
 
 const app = express()
 
@@ -40,6 +41,7 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 4000
 
 connectDB()
+  .then(() => clearUnlinkedQuoteSteps())
   .then(() => {
     app.listen(PORT, () => console.log('[api] listening on http://localhost:' + PORT))
   })

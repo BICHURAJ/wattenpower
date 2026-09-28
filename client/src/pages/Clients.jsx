@@ -5,6 +5,40 @@ import {
   PageHeader, Card, Table, Badge, SearchInput, Select, Pagination, Modal, Field,
   Tabs, Banner, Loading, StatCard, useFetch,
 } from '../components/ui'
+import LocationPicker from '../components/LocationPicker'
+import { LocationPanel, LocationModal } from '../components/LocationPanel'
+
+const TrashIcon = () => (
+  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+    <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m2 0v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6m4 5v6m4-6v6" />
+  </svg>
+)
+
+const EyeIcon = () => (
+  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+    <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z" />
+    <circle cx="12" cy="12" r="3" />
+  </svg>
+)
+
+const EditIcon = () => (
+  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+    <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+  </svg>
+)
+
+/**
+ * Asks for confirmation, then deletes. The server refuses clients that have
+ * quotations, installations or tickets, and its message explains why.
+ * Resolves to true when the client was deleted.
+ */
+async function confirmAndDelete(client) {
+  const message = 'Delete client ' + client.name + '?\n\n' +
+    'Their sites, contacts and notes are deleted too. This cannot be undone.'
+  if (!window.confirm(message)) return false
+  await api.del('/clients/' + client._id)
+  return true
+}
 
 // Screen 3: Clients
 export function ClientsList() {
@@ -15,6 +49,25 @@ export function ClientsList() {
   const navigate = useNavigate()
 
   const { data, loading, error, reload } = useFetch('/clients' + qs({ q: search, status, page }))
+  const [deletingId, setDeletingId] = useState(null)
+  const [actionError, setActionError] = useState('')
+  const [notice, setNotice] = useState('')
+
+  const remove = async (row) => {
+    setActionError('')
+    setNotice('')
+    setDeletingId(row._id)
+    try {
+      if (await confirmAndDelete(row)) {
+        setNotice('Client ' + row.name + ' deleted.')
+        reload()
+      }
+    } catch (err) {
+      setActionError(err.message)
+    } finally {
+      setDeletingId(null)
+    }
+  }
 
   const columns = [
     { key: 'name', header: 'Client Name', render: (row) => <span className="font-medium text-slate-900">{row.name}</span> },
@@ -25,7 +78,21 @@ export function ClientsList() {
     {
       key: 'actions',
       header: 'Actions',
-      render: (row) => <Link to={'/clients/' + row._id} className="text-brand-600 text-sm hover:underline" onClick={(e) => e.stopPropagation()}>View</Link>,
+      render: (row) => (
+        <span className="flex items-center gap-3">
+          <Link to={'/clients/' + row._id} className="inline-flex items-center gap-1 text-brand-600 text-sm hover:underline" onClick={(e) => e.stopPropagation()}>
+            <EyeIcon /> View
+          </Link>
+          <button
+            className="inline-flex items-center gap-1 text-sm text-slate-400 hover:text-red-600 disabled:opacity-50"
+            title={'Delete ' + row.name}
+            disabled={deletingId === row._id}
+            onClick={(e) => { e.stopPropagation(); remove(row) }}
+          >
+            <TrashIcon /> {deletingId === row._id ? 'Deleting...' : 'Delete'}
+          </button>
+        </span>
+      ),
     },
   ]
 
@@ -36,6 +103,8 @@ export function ClientsList() {
       </PageHeader>
 
       <Banner>{error}</Banner>
+      <Banner onDismiss={() => setActionError('')}>{actionError}</Banner>
+      <Banner kind="success" onDismiss={() => setNotice('')}>{notice}</Banner>
 
       <Card bodyClass="">
         <div className="flex flex-wrap gap-2 p-4 border-b border-slate-200">
@@ -50,44 +119,79 @@ export function ClientsList() {
         )}
       </Card>
 
-      <AddClientModal open={showAdd} onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); reload() }} />
+      <ClientFormModal open={showAdd} onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); reload() }} />
     </>
   )
 }
 
-function AddClientModal({ open, onClose, onSaved }) {
-  const [form, setForm] = useState({ name: '', contactPerson: '', email: '', phone: '', address: '', postcode: '' })
+const emptyClient = () => ({ name: '', contactPerson: '', email: '', phone: '', address: '', postcode: '', location: null, status: 'Active' })
+
+const clientForm = (client) => ({
+  name: client.name || '',
+  contactPerson: client.contactPerson || '',
+  email: client.email || '',
+  phone: client.phone || '',
+  address: client.address || '',
+  postcode: client.postcode || '',
+  location: client.location || null,
+  status: client.status || 'Active',
+})
+
+/** Adds a new client, or edits `client` when one is passed. */
+function ClientFormModal({ open, client, onClose, onSaved }) {
+  const editing = Boolean(client)
+  const [form, setForm] = useState(() => (editing ? clientForm(client) : emptyClient()))
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
-  const set = (key) => (e) => setForm({ ...form, [key]: e.target.value })
+  const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }))
+  // Functional update: map lookups finish asynchronously and must not overwrite newer typing.
+  const setLocation = (patch) => setForm((f) => ({ ...f, ...patch }))
 
   const save = async (e) => {
     e.preventDefault()
     setBusy(true)
     try {
-      await api.post('/clients', form)
-      setForm({ name: '', contactPerson: '', email: '', phone: '', address: '', postcode: '' })
+      if (editing) {
+        // null (not undefined) so a removed pin is actually cleared on the server.
+        await api.put('/clients/' + client._id, { ...form, location: form.location || null })
+      } else {
+        await api.post('/clients', { ...form, location: form.location || undefined })
+        setForm(emptyClient())
+      }
       onSaved()
     } catch (err) { setError(err.message) } finally { setBusy(false) }
   }
 
   return (
-    <Modal open={open} title="Add Client" onClose={onClose}>
+    <Modal open={open} title={editing ? 'Edit Client' : 'Add Client'} onClose={onClose} width="max-w-2xl">
       <Banner onDismiss={() => setError('')}>{error}</Banner>
       <form onSubmit={save} className="space-y-4">
-        <Field label="Client Name" required><input className="input" value={form.name} onChange={set('name')} required /></Field>
+        <div className={editing ? 'grid sm:grid-cols-[2fr_1fr] gap-4' : ''}>
+          <Field label="Client Name" required><input className="input" value={form.name} onChange={set('name')} required /></Field>
+          {editing && (
+            <Field label="Status">
+              <select className="input" value={form.status} onChange={set('status')}>
+                <option>Active</option>
+                <option>Inactive</option>
+              </select>
+            </Field>
+          )}
+        </div>
         <div className="grid sm:grid-cols-2 gap-4">
           <Field label="Contact Person"><input className="input" value={form.contactPerson} onChange={set('contactPerson')} /></Field>
           <Field label="Phone"><input className="input" value={form.phone} onChange={set('phone')} /></Field>
         </div>
         <Field label="Email"><input className="input" type="email" value={form.email} onChange={set('email')} /></Field>
-        <div className="grid sm:grid-cols-3 gap-4">
+        <Field label="Location">
+          <LocationPicker value={form} onChange={setLocation} height={220} />
+        </Field>
+        <div className="grid sm:grid-cols-[2fr_1fr] gap-4">
           <Field label="Address"><input className="input" value={form.address} onChange={set('address')} /></Field>
           <Field label="Postcode"><input className="input" value={form.postcode} onChange={set('postcode')} /></Field>
         </div>
         <div className="flex justify-end gap-2 pt-2">
           <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
-          <button className="btn-primary" disabled={busy}>{busy ? 'Saving...' : 'Save Client'}</button>
+          <button className="btn-primary" disabled={busy}>{busy ? 'Saving...' : editing ? 'Save Changes' : 'Save Client'}</button>
         </div>
       </form>
     </Modal>
@@ -98,6 +202,11 @@ function AddClientModal({ open, onClose, onSaved }) {
 export function ClientDetails() {
   const { id } = useParams()
   const [tab, setTab] = useState('Overview')
+  const [editingLocation, setEditingLocation] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [error, setError] = useState('')
+  const navigate = useNavigate()
   const client = useFetch('/clients/' + id)
   const summary = useFetch('/clients/' + id + '/summary')
 
@@ -107,11 +216,50 @@ export function ClientDetails() {
   const c = client.data
   const s = summary.data
 
+  const remove = async () => {
+    setError('')
+    setDeleting(true)
+    try {
+      if (await confirmAndDelete(c)) navigate('/clients')
+      else setDeleting(false)
+    } catch (err) {
+      setError(err.message)
+      setDeleting(false)
+    }
+  }
+
   return (
     <>
       <PageHeader title="Client Details" subtitle={c.name}>
         <Link to="/clients" className="btn-secondary">Back to list</Link>
+        <button className="btn-secondary" onClick={() => setEditing(true)}>
+          <EditIcon /> Edit
+        </button>
+        <button className="btn-secondary text-red-600 hover:bg-red-50 hover:border-red-200" onClick={remove} disabled={deleting}>
+          <TrashIcon /> {deleting ? 'Deleting...' : 'Delete'}
+        </button>
       </PageHeader>
+
+      <Banner onDismiss={() => setError('')}>{error}</Banner>
+
+      {/* Mounted only while open so the form starts from the latest saved values. */}
+      {editing && (
+        <ClientFormModal
+          open
+          client={c}
+          onClose={() => setEditing(false)}
+          onSaved={() => { setEditing(false); client.reload() }}
+        />
+      )}
+
+      {editingLocation && (
+        <LocationModal
+          title={'Location · ' + c.name}
+          initial={{ address: c.address, postcode: c.postcode, location: c.location || editingLocation.start }}
+          onClose={() => setEditingLocation(false)}
+          onSave={async (values) => { await api.put('/clients/' + c._id, values); setEditingLocation(false); client.reload() }}
+        />
+      )}
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-1">
@@ -130,6 +278,16 @@ export function ClientDetails() {
             <Row label="Phone">{c.phone || '--'}</Row>
             <Row label="Address">{[c.address, c.postcode].filter(Boolean).join(', ') || '--'}</Row>
           </dl>
+
+          <div className="mt-4 pt-4 border-t border-slate-100">
+            <LocationPanel
+              address={c.address}
+              postcode={c.postcode}
+              location={c.location}
+              onEdit={(start) => setEditingLocation({ start })}
+              onKeepApprox={async (point) => { await api.put('/clients/' + c._id, { location: point }); client.reload() }}
+            />
+          </div>
         </Card>
 
         <div className="lg:col-span-2 space-y-4">

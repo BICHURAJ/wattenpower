@@ -20,6 +20,7 @@ import Van from '../models/Van.js'
 import Tool from '../models/Tool.js'
 import Activity from '../models/Activity.js'
 import Installation from '../models/Installation.js'
+import Quotation from '../models/Quotation.js'
 
 const router = express.Router()
 
@@ -31,6 +32,37 @@ router.use(requireAuth)
 router.use('/dashboard', dashboardRoutes)
 router.use('/quotations', quotationRoutes)
 router.use('/installations', installationRoutes)
+
+// Delete a client. Quotations, installations and support tickets must keep
+// their client, so a client that has any is refused -- mark it Inactive instead.
+router.delete('/clients/:id', async (req, res, next) => {
+  try {
+    const client = await Client.findById(req.params.id)
+    if (!client) return res.status(404).json({ error: 'Client not found' })
+
+    const [quotations, installations, tickets] = await Promise.all([
+      Quotation.countDocuments({ client: client._id }),
+      Installation.countDocuments({ client: client._id }),
+      Ticket.countDocuments({ client: client._id }),
+    ])
+    if (quotations || installations || tickets) {
+      const plural = (n, word) => n + ' ' + word + (n === 1 ? '' : 's')
+      const linked = [
+        quotations && plural(quotations, 'quotation'),
+        installations && plural(installations, 'installation'),
+        tickets && plural(tickets, 'support ticket'),
+      ].filter(Boolean).join(', ')
+      return res.status(409).json({
+        error: client.name + ' has ' + linked + ' linked to it, so it cannot be deleted. Set its status to Inactive instead.',
+      })
+    }
+
+    await Lead.updateMany({ convertedClient: client._id }, { $unset: { convertedClient: 1 } })
+    await client.deleteOne()
+    await Activity.create({ type: 'client', text: 'Client deleted: ' + client.name, by: req.user?.name })
+    res.json({ ok: true })
+  } catch (err) { next(err) }
+})
 
 router.use('/clients', crudRouter(Client, {
   searchFields: ['name', 'contactPerson', 'email', 'phone'],
@@ -60,6 +92,7 @@ router.post('/leads/:id/convert', async (req, res, next) => {
       phone: lead.phone,
       address: lead.address,
       postcode: lead.postcode,
+      location: lead.location,
       status: 'Active',
       sites: lead.address ? [{ name: 'Main Site', address: lead.address, postcode: lead.postcode }] : [],
     })
@@ -140,6 +173,17 @@ router.use('/stock', crudRouter(StockItem, {
   defaultSort: 'name',
 }))
 
+// Delete a van. Its tools go back to the store rather than pointing at a van that no longer exists.
+router.delete('/vans/:id', async (req, res, next) => {
+  try {
+    const van = await Van.findById(req.params.id)
+    if (!van) return res.status(404).json({ error: 'Van not found' })
+    await Tool.updateMany({ van: van._id }, { $unset: { van: 1 } })
+    await van.deleteOne()
+    res.json({ ok: true })
+  } catch (err) { next(err) }
+})
+
 router.use('/vans', crudRouter(Van, {
   searchFields: ['regNo', 'model', 'name'],
   populate: [{ path: 'engineer', select: 'name' }],
@@ -158,7 +202,7 @@ router.use('/activities', crudRouter(Activity, { searchFields: ['text'], filterF
 router.get('/clients/:id/summary', async (req, res, next) => {
   try {
     const [quotations, installations, tickets] = await Promise.all([
-      (await import('../models/Quotation.js')).default.find({ client: req.params.id }).sort('-createdAt').lean(),
+      Quotation.find({ client: req.params.id }).sort('-createdAt').lean(),
       Installation.find({ client: req.params.id }).sort('-installDate').lean(),
       Ticket.find({ client: req.params.id }).sort('-createdAt').lean(),
     ])

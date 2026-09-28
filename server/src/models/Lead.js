@@ -1,4 +1,5 @@
 import mongoose from 'mongoose'
+import { LocationSchema } from './Client.js'
 
 // Screen 5: Website Lead Capture -- the "Website (Lead Capture)" node on the workflow.
 const LeadSchema = new mongoose.Schema({
@@ -7,6 +8,7 @@ const LeadSchema = new mongoose.Schema({
   phone: { type: String, required: true },
   address: String,
   postcode: String,
+  location: LocationSchema,
   leadType: {
     type: String,
     enum: ['Installation Enquiry', 'Survey Request', 'Support Request', 'General Enquiry'],

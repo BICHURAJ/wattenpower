@@ -2,29 +2,30 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, qs, shortDate } from '../api'
 import {
-  PageHeader, Card, Table, Badge, SearchInput, Select, Pagination, Field, Banner, Loading, useFetch,
+  PageHeader, Card, Table, Badge, SearchInput, Select, Pagination, Field, Banner, Loading, useFetch, BrandLogo,
 } from '../components/ui'
+import LocationPicker from '../components/LocationPicker'
 
 // Screen 5: Website Lead Capture.
 // This is the "Website (Lead Capture)" node on the workflow -- it posts to a
 // public endpoint, so a prospective customer can use it without an account.
 export default function LeadCapture() {
   const [form, setForm] = useState({
-    fullName: '', email: '', phone: '', address: '', postcode: '',
+    fullName: '', email: '', phone: '', address: '', postcode: '', location: null,
     leadType: 'Installation Enquiry', preferredContactMethod: 'Email', message: '',
   })
   const [error, setError] = useState('')
   const [done, setDone] = useState(false)
   const [busy, setBusy] = useState(false)
 
-  const set = (key) => (e) => setForm({ ...form, [key]: e.target.value })
+  const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }))
 
   const submit = async (e) => {
     e.preventDefault()
     setBusy(true)
     setError('')
     try {
-      await api.public.post('/public/leads', form)
+      await api.public.post('/public/leads', { ...form, location: form.location || undefined })
       setDone(true)
     } catch (err) { setError(err.message) } finally { setBusy(false) }
   }
@@ -32,9 +33,8 @@ export default function LeadCapture() {
   return (
     <div className="min-h-screen bg-slate-50 py-10 px-4">
       <div className="max-w-3xl mx-auto">
-        <div className="flex items-center gap-2 mb-6">
-          <span className="grid place-items-center w-8 h-8 rounded bg-brand-500 text-white">&#9889;</span>
-          <span className="font-bold text-slate-900">WATTEN POWER LTD</span>
+        <div className="mb-6">
+          <BrandLogo className="w-60 max-w-full" />
         </div>
 
         <Card title="New Lead Capture" action={<span className="text-xs text-slate-400">Source: Website</span>}>
@@ -62,6 +62,11 @@ export default function LeadCapture() {
                 <Field label="Phone" required>
                   <input className="input" placeholder="Enter phone" value={form.phone} onChange={set('phone')} required />
                 </Field>
+                <div className="sm:col-span-2">
+                  <Field label="Where is the installation? (optional)">
+                    <LocationPicker value={form} onChange={(patch) => setForm((f) => ({ ...f, ...patch }))} height={240} />
+                  </Field>
+                </div>
                 <Field label="Address">
                   <input className="input" placeholder="Enter address" value={form.address} onChange={set('address')} />
                 </Field>

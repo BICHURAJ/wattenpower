@@ -33,19 +33,34 @@ const QuotationSchema = new mongoose.Schema({
   history: [HistorySchema],
 }, { timestamps: true })
 
+const round2 = (value) => Math.round(value * 100) / 100
+
+// Each line's total includes its VAT. VAT is rounded per line, so the line
+// totals add up exactly to the quote total. Keep in step with quoteTotals() in client/src/api.js.
 QuotationSchema.methods.recalculate = function () {
   let subtotal = 0
   let vatTotal = 0
   for (const item of this.items) {
-    const line = (Number(item.qty) || 0) * (Number(item.unitPrice) || 0)
-    item.total = line
-    subtotal += line
-    vatTotal += line * ((Number(item.vat) || 0) / 100)
+    const net = round2((Number(item.qty) || 0) * (Number(item.unitPrice) || 0))
+    const vat = round2(net * ((Number(item.vat) || 0) / 100))
+    item.total = round2(net + vat)
+    subtotal += net
+    vatTotal += vat
   }
-  this.subtotal = Math.round(subtotal * 100) / 100
-  this.vatTotal = Math.round(vatTotal * 100) / 100
-  this.total = Math.round((subtotal + vatTotal) * 100) / 100
+  this.subtotal = round2(subtotal)
+  this.vatTotal = round2(vatTotal)
+  this.total = round2(this.subtotal + this.vatTotal)
 }
+
+// Installations are linked to one of their own client's quotes, so a quote
+// with jobs linked to it cannot be moved to another client.
+QuotationSchema.pre('validate', async function (next) {
+  if (!this.isNew && this.isModified('client')) {
+    const linked = await mongoose.model('Installation').exists({ quotation: this._id })
+    if (linked) this.invalidate('client', 'This quotation has an installation linked to it, so its client cannot be changed.')
+  }
+  next()
+})
 
 QuotationSchema.pre('save', async function (next) {
   this.recalculate()

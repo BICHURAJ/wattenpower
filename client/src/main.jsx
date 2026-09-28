@@ -10,7 +10,7 @@ import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import { ClientsList, ClientDetails } from './pages/Clients'
 import LeadCapture, { LeadsList } from './pages/LeadCapture'
-import { QuotationsList, QuotationCreate, QuotationDetails } from './pages/Quotations'
+import { QuotationsList, QuotationCreate, QuotationEdit, QuotationDetails } from './pages/Quotations'
 import { InstallationsList, InstallationDetails, InstallationCertification } from './pages/Installations'
 import { SupportList, GrantsList, GrantSubmission } from './pages/Support'
 import { ComplianceHub, StockInventory, VansTools, Engineers, DocumentsPage } from './pages/Operations'
@@ -33,6 +33,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             <Route path="quotations" element={<QuotationsList />} />
             <Route path="quotations/new" element={<QuotationCreate />} />
             <Route path="quotations/:id" element={<QuotationDetails />} />
+            <Route path="quotations/:id/edit" element={<QuotationEdit />} />
             <Route path="installations" element={<InstallationsList />} />
             <Route path="installations/:id" element={<InstallationDetails />} />
             <Route path="installations/:id/certification" element={<InstallationCertification />} />

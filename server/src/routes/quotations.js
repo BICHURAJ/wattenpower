@@ -3,6 +3,7 @@ import Quotation from '../models/Quotation.js'
 import Installation from '../models/Installation.js'
 import Activity from '../models/Activity.js'
 import { crudRouter } from '../middleware/crud.js'
+import { syncAfterQuotationChange } from '../quoteProgress.js'
 
 const router = express.Router()
 
@@ -18,6 +19,7 @@ router.post('/:id/send', async (req, res, next) => {
     quote.status = 'Sent'
     quote.history.push({ action: 'Quotation sent to client', by: req.user?.name })
     await quote.save()
+    await syncAfterQuotationChange(quote)
 
     await Activity.create({
       type: 'quotation',
@@ -38,6 +40,7 @@ router.post('/:id/accept', async (req, res, next) => {
     quote.status = 'Accepted'
     quote.history.push({ action: 'Quotation accepted by client', by: req.user?.name })
     await quote.save()
+    await syncAfterQuotationChange(quote)
 
     let installation = await Installation.findOne({ quotation: quote._id })
     if (!installation) {
@@ -67,14 +70,31 @@ router.post('/:id/decline', async (req, res, next) => {
     quote.status = 'Declined'
     quote.history.push({ action: 'Quotation declined by client', by: req.user?.name })
     await quote.save()
+    await syncAfterQuotationChange(quote)
     res.json(quote)
   } catch (err) { next(err) }
 })
 
 // --- Standard list / read / create / update / delete ------------------------
+// Address and contact come along so the quotation PDF has a proper "Quote for" block.
+const POPULATE = [{ path: 'client', select: 'name email phone contactPerson address postcode' }]
+
+// Quotation Details, plus the installation jobs linked to it.
+router.get('/:id', async (req, res, next) => {
+  try {
+    let query = Quotation.findById(req.params.id)
+    for (const p of POPULATE) query = query.populate(p)
+    const quote = await query.lean()
+    if (!quote) return res.status(404).json({ error: 'Not found' })
+    quote.installations = await Installation.find({ quotation: quote._id })
+      .select('installNo status installDate').sort('-createdAt').lean()
+    res.json(quote)
+  } catch (err) { next(err) }
+})
+
 router.use('/', crudRouter(Quotation, {
   searchFields: ['quoteNo', 'site', 'reference'],
-  populate: [{ path: 'client', select: 'name email' }],
+  populate: POPULATE,
   afterCreate: async (doc) => {
     await doc.populate('client', 'name')
     await Activity.create({
@@ -83,6 +103,8 @@ router.use('/', crudRouter(Quotation, {
       refId: doc._id,
     })
   },
+  // Status set directly from the edit form (Draft / Expired).
+  afterUpdate: syncAfterQuotationChange,
 }))
 
 export default router

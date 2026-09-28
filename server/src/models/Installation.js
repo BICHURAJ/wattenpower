@@ -1,4 +1,5 @@
 import mongoose from 'mongoose'
+import { LocationSchema } from './Client.js'
 
 const TaskSchema = new mongoose.Schema({
   title: String,
@@ -20,6 +21,11 @@ const InstallationSchema = new mongoose.Schema({
   engineer: { type: mongoose.Schema.Types.ObjectId, ref: 'Engineer' },
   chargerModel: String,
   supplyType: { type: String, enum: ['Single Phase', 'Three Phase'], default: 'Single Phase' },
+  // Where the job is. Defaults to the client's address but can differ (another site, a tenant...).
+  address: String,
+  postcode: String,
+  coordinates: LocationSchema, // map pin { lat, lng }
+  // Where on the property the charger goes, e.g. "Garage - Right Wall".
   location: String,
   accessNotes: String,
   // The five stages shown on the Installation Details progress panel.
@@ -33,9 +39,58 @@ const InstallationSchema = new mongoose.Schema({
   // "Project Compliance Hub -- DNO Notification" node on the workflow.
   dnoNotified: { type: Boolean, default: false },
   dnoNotifiedAt: Date,
+  // When the job was marked Completed (cleared if it is reopened).
+  completedAt: Date,
+  // Set while the job is On Hold, so it can be shown and resumed where it left off.
+  hold: {
+    reason: String,
+    since: Date,
+    previousStatus: String,
+  },
   tasks: [TaskSchema],
   notes: String,
 }, { timestamps: true })
+
+// A completed site survey is final: once ticked it cannot be unticked.
+InstallationSchema.pre('validate', function (next) {
+  if (!this.isNew && this.isModified('progress.siteSurveyCompleted') && !this.progress?.siteSurveyCompleted) {
+    this.invalidate('progress.siteSurveyCompleted', 'The site survey is already completed and cannot be undone.')
+  }
+  next()
+})
+
+// Progress is frozen while a job is on hold.
+const HAND_STEPS = ['siteSurveyCompleted', 'installationInProgress', 'testingCertification', 'handover']
+InstallationSchema.pre('validate', function (next) {
+  if (!this.isNew && this.status === 'On Hold' && !this.isModified('status') &&
+      HAND_STEPS.some((step) => this.isModified('progress.' + step))) {
+    this.invalidate('progress', 'This job is on hold. Resume it before changing its progress.')
+  }
+  // Moved off hold some other way (e.g. the edit form): the hold details no longer apply.
+  if (this.isModified('status') && this.status !== 'On Hold' && this.hold?.since) this.hold = undefined
+  next()
+})
+
+// Record when a job is completed; reopening it clears the date.
+InstallationSchema.pre('validate', function (next) {
+  if (this.isNew || this.isModified('status')) {
+    if (this.status === 'Completed' && !this.completedAt) this.completedAt = new Date()
+    if (this.status !== 'Completed' && this.completedAt) this.completedAt = undefined
+  }
+  next()
+})
+
+// A job can only be linked to one of its own client's quotations.
+InstallationSchema.pre('validate', async function (next) {
+  if (this.quotation && this.client && (this.isModified('quotation') || this.isModified('client'))) {
+    const quote = await mongoose.model('Quotation').findById(this.quotation).select('client quoteNo').lean()
+    if (!quote) this.invalidate('quotation', 'That quotation no longer exists.')
+    else if (String(quote.client) !== String(this.client)) {
+      this.invalidate('quotation', 'Quotation ' + quote.quoteNo + ' belongs to a different client.')
+    }
+  }
+  next()
+})
 
 InstallationSchema.pre('save', async function (next) {
   if (!this.installNo) {

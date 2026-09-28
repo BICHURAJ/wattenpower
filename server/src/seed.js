@@ -6,7 +6,7 @@ import { connectDB } from './db.js'
 import User from './models/User.js'
 import Client from './models/Client.js'
 import Lead from './models/Lead.js'
-import Engineer from './models/Engineer.js'
+import Engineer, { defaultWeek } from './models/Engineer.js'
 import Quotation from './models/Quotation.js'
 import Installation from './models/Installation.js'
 import Certification from './models/Certification.js'
@@ -49,21 +49,33 @@ async function seed() {
   ])
 
   // --- Engineers -----------------------------------------------------------
+  // Start from the standard Mon-Fri week and override individual days.
+  const week = (overrides = {}) => defaultWeek().map((d) => ({ ...d, ...(overrides[d.day] || {}) }))
   const engineers = await Engineer.create([
     {
       name: 'John Smith', email: 'john.smith@wattenpower.co.uk', phone: '07700 111222', status: 'On Job',
+      coverageArea: 'London & South East',
+      weeklySchedule: week({ Sat: { working: true, start: '09:00', end: '13:00' } }),
       certifications: [{ name: 'NICEIC Approved Contractor', body: 'NICEIC', number: 'NIC-88213', expiryDate: day(210) }],
     },
     {
       name: 'Mike Brown', email: 'mike.brown@wattenpower.co.uk', phone: '07700 333444', status: 'On Job',
+      coverageArea: 'Kent & Sussex',
+      weeklySchedule: week({ Mon: { start: '07:00', end: '15:30' }, Tue: { start: '07:00', end: '15:30' }, Wed: { start: '07:00', end: '15:30' }, Thu: { start: '07:00', end: '15:30' }, Fri: { working: false } }),
+      timeOff: [{ from: day(14), to: day(21), reason: 'Holiday' }],
       certifications: [{ name: 'ECS Gold Card', body: 'ECS', number: 'ECS-44120', expiryDate: day(20) }],
     },
     {
       name: 'Alex Lee', email: 'alex.lee@wattenpower.co.uk', phone: '07700 555666', status: 'Available',
+      coverageArea: 'Surrey & Hampshire',
+      weeklySchedule: week(),
       certifications: [{ name: 'NAPIT Registered', body: 'NAPIT', number: 'NAP-70311', expiryDate: day(310) }],
     },
     {
       name: 'Sarah White', email: 'sarah.white@wattenpower.co.uk', phone: '07700 777888', status: 'Available',
+      coverageArea: 'Essex & Hertfordshire',
+      weeklySchedule: week({ Wed: { working: false }, Sat: { working: true, start: '08:00', end: '16:00' } }),
+      timeOff: [{ from: day(-1), to: day(1), reason: 'Training course' }],
       certifications: [{ name: 'City & Guilds 2921', body: 'C&G', number: 'CG-2921-556', expiryDate: day(400) }],
     },
   ])
@@ -252,9 +264,19 @@ async function seed() {
 
   // --- Vans and tools (screen 16) ------------------------------------------
   const vans = await Van.create([
-    { regNo: 'WP31 ABC', name: 'Van 1', model: 'Ford Transit', engineer: johnSmith._id, status: 'On Road', mileage: 45230, motDue: day(120) },
-    { regNo: 'WP22 DEF', name: 'Van 2', model: 'Ford Transit', engineer: mikeBrown._id, status: 'On Road', mileage: 38910, motDue: day(60) },
-    { regNo: 'WP23 GHI', name: 'Van 3', model: 'Ford Transit', engineer: alexLee._id, status: 'In Service', mileage: 52100, motDue: day(15) },
+    {
+      regNo: 'WP31 ABC', name: 'Van 1', model: 'Ford Transit', engineer: johnSmith._id, status: 'On Road', mileage: 45230,
+      motDue: day(120), motCertificateNo: '1234 5678 9012',
+      insurer: 'Aviva', insurancePolicyNo: 'AV-FLT-448120', insuranceType: 'Fleet Policy', insuranceExpiry: day(200),
+    },
+    {
+      regNo: 'WP22 DEF', name: 'Van 2', model: 'Ford Transit', engineer: mikeBrown._id, status: 'On Road', mileage: 38910,
+      motDue: day(60), insurer: 'Aviva', insurancePolicyNo: 'AV-FLT-448120', insuranceType: 'Fleet Policy', insuranceExpiry: day(200),
+    },
+    {
+      regNo: 'WP23 GHI', name: 'Van 3', model: 'Ford Transit', engineer: alexLee._id, status: 'In Service', mileage: 52100,
+      motDue: day(15), insurer: 'AXA', insurancePolicyNo: 'AXA-CV-90211', insuranceType: 'Comprehensive', insuranceExpiry: day(-3),
+    },
   ])
 
   await Tool.create([
