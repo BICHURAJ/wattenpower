@@ -1,9 +1,12 @@
 import express from 'express'
 
-import { requireAuth } from '../middleware/auth.js'
+import { requireAuth, authorize, requirePermission } from '../middleware/auth.js'
 import { crudRouter } from '../middleware/crud.js'
+import { userCan } from '../permissions.js'
 
 import authRoutes from './auth.js'
+import userRoutes from './users.js'
+import messageRoutes from './messages.js'
 import dashboardRoutes from './dashboard.js'
 import quotationRoutes from './quotations.js'
 import installationRoutes from './installations.js'
@@ -26,9 +29,18 @@ const router = express.Router()
 
 router.use('/auth', authRoutes)
 
-// Everything past this point needs a signed-in user.
+// Everything past this point needs a signed-in user...
 router.use(requireAuth)
 
+// ...whose role allows the request (see permissions.js). Each API area is
+// checked here, before any of its routes, so a new route can't miss the check.
+const RESOURCES = ['dashboard', 'clients', 'leads', 'quotations', 'installations', 'tickets', 'grants',
+  'engineers', 'compliance', 'documents', 'stock', 'vans', 'tools', 'activities', 'users']
+for (const resource of RESOURCES) router.use('/' + resource, authorize(resource))
+
+router.use('/users', userRoutes)
+// Messages between users: open to every signed-in user, so not an area in permissions.js.
+router.use('/messages', messageRoutes)
 router.use('/dashboard', dashboardRoutes)
 router.use('/quotations', quotationRoutes)
 router.use('/installations', installationRoutes)
@@ -80,7 +92,7 @@ router.use('/leads', crudRouter(Lead, {
 }))
 
 // Turn a website enquiry into a real client record.
-router.post('/leads/:id/convert', async (req, res, next) => {
+router.post('/leads/:id/convert', requirePermission('clients', 'create'), async (req, res, next) => {
   try {
     const lead = await Lead.findById(req.params.id)
     if (!lead) return res.status(404).json({ error: 'Lead not found' })
@@ -196,13 +208,24 @@ router.use('/tools', crudRouter(Tool, {
   defaultSort: 'name',
 }))
 
-router.use('/activities', crudRouter(Activity, { searchFields: ['text'], filterFields: ['type'] }))
+// Admins see everyone's activity; other users only their own.
+const ownActivity = (req) => (userCan(req.user, 'allActivity') ? {} : { user: req.user._id })
+router.get('/activities/:id', async (req, res, next) => {
+  try {
+    const item = await Activity.findOne({ _id: req.params.id, ...ownActivity(req) }).lean()
+    if (!item) return res.status(404).json({ error: 'Not found' })
+    res.json(item)
+  } catch (err) { next(err) }
+})
+router.use('/activities', crudRouter(Activity, { searchFields: ['text'], filterFields: ['type'], baseFilter: ownActivity }))
 
 // Client detail screen (4) needs the client's related records in one call.
 router.get('/clients/:id/summary', async (req, res, next) => {
   try {
+    // Roles that can't see quotations (engineers) don't get the client's prices either.
+    const seesQuotes = userCan(req.user, 'quotations', 'read')
     const [quotations, installations, tickets] = await Promise.all([
-      Quotation.find({ client: req.params.id }).sort('-createdAt').lean(),
+      seesQuotes ? Quotation.find({ client: req.params.id }).sort('-createdAt').lean() : [],
       Installation.find({ client: req.params.id }).sort('-installDate').lean(),
       Ticket.find({ client: req.params.id }).sort('-createdAt').lean(),
     ])

@@ -1,7 +1,10 @@
 import { useState } from 'react'
-import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { Link, Navigate, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth'
 import { BrandLogo } from './ui'
+import { useMessageAlerts, MessageToasts } from './MessageAlerts'
+
+const MESSAGE_ICON = 'M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12Z'
 
 // The sidebar mirrors the sections of the workflow diagram, in the order a job
 // actually moves: enquiry -> quote -> install -> certify -> support.
@@ -9,40 +12,41 @@ const NAV_GROUPS = [
   {
     label: 'Monitor',
     items: [
-      { to: '/', label: 'Overview', end: true, icon: 'M3 12h7V3H3v9Zm11 9h7v-9h-7v9ZM3 21h7v-6H3v6Zm11-12h7V3h-7v6Z' },
-      { to: '/reports', label: 'Reports', icon: 'M4 20V10M10 20V4M16 20v-7M22 20H2' },
+      { to: '/', label: 'Overview', end: true, resource: 'dashboard', icon: 'M3 12h7V3H3v9Zm11 9h7v-9h-7v9ZM3 21h7v-6H3v6Zm11-12h7V3h-7v6Z' },
+      { to: '/reports', label: 'Reports', resource: 'dashboard', icon: 'M4 20V10M10 20V4M16 20v-7M22 20H2' },
     ],
   },
   {
     label: 'Sales',
     items: [
-      { to: '/clients', label: 'Clients', icon: 'M16 21v-2a4 4 0 0 0-8 0v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z' },
-      { to: '/leads', label: 'Website Leads', icon: 'M4 4h16v12H5.2L4 17.2V4Z' },
-      { to: '/quotations', label: 'Quotations', icon: 'M6 2h9l5 5v15H6V2Zm9 0v5h5' },
+      { to: '/clients', label: 'Clients', resource: 'clients', icon: 'M16 21v-2a4 4 0 0 0-8 0v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z' },
+      { to: '/leads', label: 'Website Leads', resource: 'leads', icon: 'M4 4h16v12H5.2L4 17.2V4Z' },
+      { to: '/quotations', label: 'Quotations', resource: 'quotations', icon: 'M6 2h9l5 5v15H6V2Zm9 0v5h5' },
     ],
   },
   {
     label: 'Jobs',
     items: [
-      { to: '/installations', label: 'Installations', icon: 'M13 2 3 14h8l-1 8 10-12h-8l1-8Z' },
-      { to: '/support', label: 'Post-Install Support', icon: 'M18 8a6 6 0 1 0-12 0v5l-2 3h16l-2-3V8Z' },
-      { to: '/grants', label: 'OZEV Grants', icon: 'M12 2 2 7l10 5 10-5-10-5ZM2 17l10 5 10-5M2 12l10 5 10-5' },
+      { to: '/installations', label: 'Installations', resource: 'installations', icon: 'M13 2 3 14h8l-1 8 10-12h-8l1-8Z' },
+      { to: '/support', label: 'Post-Install Support', resource: 'tickets', icon: 'M18 8a6 6 0 1 0-12 0v5l-2 3h16l-2-3V8Z' },
+      { to: '/grants', label: 'OZEV Grants', resource: 'grants', icon: 'M12 2 2 7l10 5 10-5-10-5ZM2 17l10 5 10-5M2 12l10 5 10-5' },
     ],
   },
   {
     label: 'Operations',
     items: [
-      { to: '/engineers', label: 'Engineers', icon: 'M17 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9.5 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z' },
-      { to: '/compliance', label: 'Compliance Hub', icon: 'M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3Z' },
-      { to: '/documents', label: 'Documents', icon: 'M6 2h9l5 5v15H6V2Z' },
-      { to: '/stock', label: 'Stock & Inventory', icon: 'M3 7h18v13H3V7Zm0 0 2-4h14l2 4M12 7v13' },
-      { to: '/vans', label: 'Vans & Tools', icon: 'M3 16V6h11v10M14 9h4l3 4v3h-7V9ZM7 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm10 0a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z' },
+      { to: '/engineers', label: 'Engineers', resource: 'engineers', icon: 'M17 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9.5 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z' },
+      { to: '/compliance', label: 'Compliance Hub', resource: 'compliance', icon: 'M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3Z' },
+      { to: '/documents', label: 'Documents', resource: 'documents', icon: 'M6 2h9l5 5v15H6V2Z' },
+      { to: '/stock', label: 'Stock & Inventory', resource: 'stock', icon: 'M3 7h18v13H3V7Zm0 0 2-4h14l2 4M12 7v13' },
+      { to: '/vans', label: 'Vans & Tools', resource: 'vans', icon: 'M3 16V6h11v10M14 9h4l3 4v3h-7V9ZM7 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm10 0a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z' },
     ],
   },
   {
     label: 'Workspace',
     items: [
-      { to: '/settings', label: 'Settings', icon: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm8-3a8 8 0 0 1-.1 1.2l2 1.6-2 3.4-2.4-1a8 8 0 0 1-2 1.2l-.4 2.6h-4l-.4-2.6a8 8 0 0 1-2-1.2l-2.4 1-2-3.4 2-1.6A8 8 0 0 1 4 12c0-.4 0-.8.1-1.2l-2-1.6 2-3.4 2.4 1a8 8 0 0 1 2-1.2L8.9 3h4l.4 2.6a8 8 0 0 1 2 1.2l2.4-1 2 3.4-2 1.6c.1.4.1.8.1 1.2Z' },
+      { to: '/messages', label: 'Messages', icon: MESSAGE_ICON },
+      { to: '/users', label: 'Users', resource: 'users', icon: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm13 10v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8' },
     ],
   },
 ]
@@ -60,7 +64,23 @@ export function Icon({ path, className = 'w-4 h-4' }) {
 // Header title follows the section you're in, so deep pages keep their context.
 function sectionFor(pathname) {
   if (pathname === '/') return ALL_ITEMS[0]
-  return ALL_ITEMS.find((item) => item.to !== '/' && pathname.startsWith(item.to)) || ALL_ITEMS[0]
+  return ALL_ITEMS.find((item) => item.to !== '/' && (pathname === item.to || pathname.startsWith(item.to + '/'))) || ALL_ITEMS[0]
+}
+
+const ROLE_NAMES = { admin: 'Admin', finance: 'Finance', sales: 'Sales', engineer: 'Engineer' }
+
+/** Shown instead of a page the user's role can't open (the server refuses its data anyway). */
+function NoAccess({ label, home }) {
+  return (
+    <div className="card max-w-lg mx-auto mt-10 p-8 text-center">
+      <div className="grid place-items-center w-12 h-12 mx-auto rounded-full bg-slate-100 text-slate-400 mb-3">
+        <Icon path="M7 11V7a5 5 0 0 1 10 0v4M5 11h14v10H5V11Z" className="w-5 h-5" />
+      </div>
+      <h2 className="font-semibold text-slate-900">No access to {label}</h2>
+      <p className="text-sm text-slate-500 mt-1">Your role doesn't include this area. Ask an admin if you need it.</p>
+      {home && <Link to={home.to} className="btn-secondary mt-5">Go to {home.label}</Link>}
+    </div>
+  )
 }
 
 function greeting() {
@@ -71,14 +91,23 @@ function greeting() {
 }
 
 export default function Layout() {
-  const { user, logout } = useAuth()
+  const { user, logout, can } = useAuth()
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const [menuOpen, setMenuOpen] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  // Unread count for the badges, and pop-ups when a new message arrives.
+  const { unread, toasts, dismiss } = useMessageAlerts(pathname)
 
   const signOut = () => { logout(); navigate('/login') }
   const section = sectionFor(pathname)
+  // Menu items without a resource are open to everyone; groups left empty are dropped.
+  const visibleGroups = NAV_GROUPS
+    .map((group) => ({ ...group, items: group.items.filter((item) => !item.resource || can(item.resource)) }))
+    .filter((group) => group.items.length)
+  const allowed = !section.resource || can(section.resource)
+  // First tab this user has -- where they go if the Overview tab is switched off for them.
+  const home = visibleGroups[0]?.items[0]
   const firstName = (user?.name || '').split(' ')[0]
   const today = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })
 
@@ -94,7 +123,7 @@ export default function Layout() {
           </Link>
 
           <nav className="flex-1 overflow-y-auto px-3 pb-3">
-            {NAV_GROUPS.map((group) => (
+            {visibleGroups.map((group) => (
               <div key={group.label}>
                 <p className="nav-section">{group.label}</p>
                 <div className="space-y-0.5">
@@ -108,6 +137,11 @@ export default function Layout() {
                     >
                       <Icon path={item.icon} />
                       {item.label}
+                      {item.to === '/messages' && unread > 0 && (
+                        <span className="ml-auto min-w-[18px] h-[18px] px-1 grid place-items-center rounded-full bg-red-500 text-white text-[10px] font-semibold">
+                          {unread > 99 ? '99+' : unread}
+                        </span>
+                      )}
                     </NavLink>
                   ))}
                 </div>
@@ -123,7 +157,7 @@ export default function Layout() {
               </span>
               <span className="flex-1 min-w-0">
                 <span className="block text-sm font-medium text-slate-800 truncate">{user?.name}</span>
-                <span className="block text-xs text-slate-400 capitalize truncate">{user?.role}</span>
+                <span className="block text-xs text-slate-400 truncate">{ROLE_NAMES[user?.role] || user?.role}</span>
               </span>
               <span className="text-slate-400">&#8942;</span>
             </button>
@@ -162,21 +196,40 @@ export default function Layout() {
                 <input className="input rounded-full bg-slate-50 border-transparent pl-10 pr-12" placeholder="Search clients, jobs..." disabled />
                 <kbd className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-medium text-slate-400">&#8984;K</kbd>
               </div>
-              <Link to="/support" className="relative grid place-items-center w-9 h-9 rounded-full border border-slate-200 text-slate-500 hover:bg-slate-50" title="Support tickets">
-                <Icon path="M18 8a6 6 0 1 0-12 0v5l-2 3h16l-2-3V8Zm-8 12a2 2 0 0 0 4 0" />
-                <span className="absolute top-2 right-2.5 w-1.5 h-1.5 rounded-full bg-brand-500 ring-2 ring-white" />
+              <Link
+                to="/messages"
+                className="relative grid place-items-center w-9 h-9 rounded-full border border-slate-200 text-slate-500 hover:bg-slate-50"
+                title={unread ? unread + ' unread message' + (unread === 1 ? '' : 's') : 'Messages'}
+              >
+                <Icon path={MESSAGE_ICON} />
+                {unread > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 grid place-items-center rounded-full bg-red-500 text-white text-[10px] font-semibold ring-2 ring-white">
+                    {unread > 99 ? '99+' : unread}
+                  </span>
+                )}
               </Link>
-              <Link to="/lead-capture" className="btn-primary rounded-full hidden sm:inline-flex">
-                <span className="text-base leading-none">+</span> New Lead
-              </Link>
+              {can('tickets') && (
+                <Link to="/support" className="relative grid place-items-center w-9 h-9 rounded-full border border-slate-200 text-slate-500 hover:bg-slate-50" title="Support tickets">
+                  <Icon path="M18 8a6 6 0 1 0-12 0v5l-2 3h16l-2-3V8Zm-8 12a2 2 0 0 0 4 0" />
+                  <span className="absolute top-2 right-2.5 w-1.5 h-1.5 rounded-full bg-brand-500 ring-2 ring-white" />
+                </Link>
+              )}
+              {can('leads', 'create') && (
+                <Link to="/lead-capture" className="btn-primary rounded-full hidden sm:inline-flex">
+                  <span className="text-base leading-none">+</span> New Lead
+                </Link>
+              )}
             </div>
           </header>
 
           <main className="flex-1 overflow-y-auto bg-[#f5f8fd] p-4 sm:p-6" onClick={() => menuOpen && setMenuOpen(false)}>
-            <Outlet />
+            {allowed ? <Outlet />
+              : pathname === '/' && home && home.to !== '/' ? <Navigate to={home.to} replace />
+              : <NoAccess label={section.label} home={home} />}
           </main>
         </div>
       </div>
+      <MessageToasts toasts={toasts} onDismiss={dismiss} />
     </div>
   )
 }

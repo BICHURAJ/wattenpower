@@ -51,3 +51,9 @@
 .wp-inst-links { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; padding-top: 8px; border-top: 1px solid #e2e8f0; }
 .wp-inst-links a, .wp-inst-links button { color: #006afd; font-size: 12px; font-weight: 500; text-decoration: none; text-align: left; background: none; border: 0; padding: 0; cursor: pointer; }
 .wp-inst-links a:hover, .wp-inst-links button:hover { text-decoration: underline; }
+
+/* New-message pop-up slides in from the right. */
+@keyframes wp-toast-in {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: none; }
+}

@@ -6,6 +6,7 @@ import {
   Tabs, Banner, Loading, useFetch,
 } from '../components/ui'
 import { exportQuotationPdf } from '../reports/quotation'
+import { useAuth } from '../auth'
 
 const STATUSES = ['All', 'Draft', 'Sent', 'Accepted', 'Declined', 'Expired']
 
@@ -47,6 +48,7 @@ export function QuotationsList() {
   const navigate = useNavigate()
   const { data, loading, error } = useFetch('/quotations' + qs({ q: search, status, page }))
   const { busyId, pdfError, setPdfError, download } = usePdfExport()
+  const { can } = useAuth()
 
   const columns = [
     { key: 'quoteNo', header: 'Quote No.', render: (r) => <span className="font-medium text-slate-900">{r.quoteNo}</span> },
@@ -60,9 +62,11 @@ export function QuotationsList() {
       render: (r) => (
         <span className="flex items-center gap-3">
           <Link to={'/quotations/' + r._id} className="text-brand-600 text-sm hover:underline" onClick={(e) => e.stopPropagation()}>View</Link>
-          <Link to={'/quotations/' + r._id + '/edit'} className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-brand-600" onClick={(e) => e.stopPropagation()}>
-            <EditIcon /> Edit
-          </Link>
+          {can('quotations', 'update') && (
+            <Link to={'/quotations/' + r._id + '/edit'} className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-brand-600" onClick={(e) => e.stopPropagation()}>
+              <EditIcon /> Edit
+            </Link>
+          )}
           <button
             className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-brand-600 disabled:opacity-50"
             disabled={busyId === r._id}
@@ -79,7 +83,7 @@ export function QuotationsList() {
   return (
     <>
       <PageHeader title="Quotations" subtitle="Prices sent to clients and where each one stands">
-        <Link to="/quotations/new" className="btn-primary">+ New Quotation</Link>
+        {can('quotations', 'create') && <Link to="/quotations/new" className="btn-primary">+ New Quotation</Link>}
       </PageHeader>
 
       <Banner>{error}</Banner>
@@ -322,6 +326,8 @@ export function QuotationDetails() {
   const [notice, setNotice] = useState(null) // { text, installationId }
   const { data: quote, loading, reload } = useFetch('/quotations/' + id)
   const { busyId, pdfError, setPdfError, download } = usePdfExport()
+  const { can } = useAuth()
+  const canEdit = can('quotations', 'update')
 
   if (loading) return <Loading />
   if (!quote) return <Banner>Quotation not found.</Banner>
@@ -345,12 +351,12 @@ export function QuotationDetails() {
     <>
       <PageHeader title={'Quotation ' + quote.quoteNo} subtitle={quote.client?.name}>
         <Link to="/quotations" className="btn-secondary">Back</Link>
-        <Link to={'/quotations/' + id + '/edit'} className="btn-secondary"><EditIcon /> Edit</Link>
+        {canEdit && <Link to={'/quotations/' + id + '/edit'} className="btn-secondary"><EditIcon /> Edit</Link>}
         <button className="btn-secondary" onClick={() => download(quote)} disabled={busyId === quote._id}>
           <DownloadIcon /> {busyId === quote._id ? 'Preparing...' : 'Download PDF'}
         </button>
-        {quote.status === 'Draft' && <button className="btn-primary" onClick={() => act('send')}>Send Quotation</button>}
-        {quote.status === 'Sent' && (
+        {canEdit && quote.status === 'Draft' && <button className="btn-primary" onClick={() => act('send')}>Send Quotation</button>}
+        {canEdit && quote.status === 'Sent' && (
           <>
             <button className="btn-secondary" onClick={() => act('decline')}>Mark Declined</button>
             <button className="btn-primary" onClick={() => act('accept')}>Mark Accepted</button>

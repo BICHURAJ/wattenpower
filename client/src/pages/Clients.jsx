@@ -5,6 +5,7 @@ import {
   PageHeader, Card, Table, Badge, SearchInput, Select, Pagination, Modal, Field,
   Tabs, Banner, Loading, StatCard, useFetch,
 } from '../components/ui'
+import { useAuth } from '../auth'
 import LocationPicker from '../components/LocationPicker'
 import { LocationPanel, LocationModal } from '../components/LocationPanel'
 
@@ -52,6 +53,7 @@ export function ClientsList() {
   const [deletingId, setDeletingId] = useState(null)
   const [actionError, setActionError] = useState('')
   const [notice, setNotice] = useState('')
+  const { can } = useAuth()
 
   const remove = async (row) => {
     setActionError('')
@@ -83,14 +85,16 @@ export function ClientsList() {
           <Link to={'/clients/' + row._id} className="inline-flex items-center gap-1 text-brand-600 text-sm hover:underline" onClick={(e) => e.stopPropagation()}>
             <EyeIcon /> View
           </Link>
-          <button
-            className="inline-flex items-center gap-1 text-sm text-slate-400 hover:text-red-600 disabled:opacity-50"
-            title={'Delete ' + row.name}
-            disabled={deletingId === row._id}
-            onClick={(e) => { e.stopPropagation(); remove(row) }}
-          >
-            <TrashIcon /> {deletingId === row._id ? 'Deleting...' : 'Delete'}
-          </button>
+          {can('clients', 'delete') && (
+            <button
+              className="inline-flex items-center gap-1 text-sm text-slate-400 hover:text-red-600 disabled:opacity-50"
+              title={'Delete ' + row.name}
+              disabled={deletingId === row._id}
+              onClick={(e) => { e.stopPropagation(); remove(row) }}
+            >
+              <TrashIcon /> {deletingId === row._id ? 'Deleting...' : 'Delete'}
+            </button>
+          )}
         </span>
       ),
     },
@@ -99,7 +103,7 @@ export function ClientsList() {
   return (
     <>
       <PageHeader title="Clients" subtitle="Every account on the books, from first enquiry onwards">
-        <button className="btn-primary" onClick={() => setShowAdd(true)}>+ Add Client</button>
+        {can('clients', 'create') && <button className="btn-primary" onClick={() => setShowAdd(true)}>+ Add Client</button>}
       </PageHeader>
 
       <Banner>{error}</Banner>
@@ -209,6 +213,8 @@ export function ClientDetails() {
   const navigate = useNavigate()
   const client = useFetch('/clients/' + id)
   const summary = useFetch('/clients/' + id + '/summary')
+  const { can } = useAuth()
+  const canEdit = can('clients', 'update')
 
   if (client.loading || summary.loading) return <Loading />
   if (client.error) return <Banner>{client.error}</Banner>
@@ -232,12 +238,16 @@ export function ClientDetails() {
     <>
       <PageHeader title="Client Details" subtitle={c.name}>
         <Link to="/clients" className="btn-secondary">Back to list</Link>
-        <button className="btn-secondary" onClick={() => setEditing(true)}>
-          <EditIcon /> Edit
-        </button>
-        <button className="btn-secondary text-red-600 hover:bg-red-50 hover:border-red-200" onClick={remove} disabled={deleting}>
-          <TrashIcon /> {deleting ? 'Deleting...' : 'Delete'}
-        </button>
+        {canEdit && (
+          <button className="btn-secondary" onClick={() => setEditing(true)}>
+            <EditIcon /> Edit
+          </button>
+        )}
+        {can('clients', 'delete') && (
+          <button className="btn-secondary text-red-600 hover:bg-red-50 hover:border-red-200" onClick={remove} disabled={deleting}>
+            <TrashIcon /> {deleting ? 'Deleting...' : 'Delete'}
+          </button>
+        )}
       </PageHeader>
 
       <Banner onDismiss={() => setError('')}>{error}</Banner>
@@ -286,6 +296,7 @@ export function ClientDetails() {
               location={c.location}
               onEdit={(start) => setEditingLocation({ start })}
               onKeepApprox={async (point) => { await api.put('/clients/' + c._id, { location: point }); client.reload() }}
+              readOnly={!canEdit}
             />
           </div>
         </Card>
@@ -375,6 +386,7 @@ export function ClientDetails() {
 }
 
 function ClientNotes({ client, onSaved }) {
+  const { can } = useAuth()
   const [body, setBody] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -390,10 +402,12 @@ function ClientNotes({ client, onSaved }) {
 
   return (
     <div>
-      <div className="flex gap-2 mb-4">
-        <input className="input" placeholder="Add a note..." value={body} onChange={(e) => setBody(e.target.value)} />
-        <button className="btn-primary" onClick={add} disabled={busy}>Add</button>
-      </div>
+      {can('clients', 'update') && (
+        <div className="flex gap-2 mb-4">
+          <input className="input" placeholder="Add a note..." value={body} onChange={(e) => setBody(e.target.value)} />
+          <button className="btn-primary" onClick={add} disabled={busy}>Add</button>
+        </div>
+      )}
       <div className="divide-y divide-slate-100">
         {(client.notes || []).length === 0 && <Empty>No notes yet.</Empty>}
         {(client.notes || []).map((note) => (

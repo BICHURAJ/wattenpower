@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, qs, shortDate } from '../api'
+import { useAuth } from '../auth'
 import {
   PageHeader, Card, Table, Badge, SearchInput, Select, Pagination, Field, Modal,
   Banner, Loading, useFetch,
@@ -14,6 +15,8 @@ export function SupportList() {
   const [showNew, setShowNew] = useState(false)
   const [error, setError] = useState('')
   const { data, loading, reload } = useFetch('/tickets' + qs({ q: search, status, page }))
+  const { can } = useAuth()
+  const canUpdate = can('tickets', 'update')
 
   const advance = async (ticket, nextStatus) => {
     try {
@@ -38,8 +41,8 @@ export function SupportList() {
       key: 'actions', header: 'Actions',
       render: (r) => (
         <div className="flex gap-2">
-          {r.status === 'Open' && <button className="text-brand-600 text-xs hover:underline" onClick={() => advance(r, 'In Progress')}>Start</button>}
-          {r.status !== 'Closed' && <button className="text-slate-500 text-xs hover:underline" onClick={() => advance(r, 'Closed')}>Close</button>}
+          {canUpdate && r.status === 'Open' && <button className="text-brand-600 text-xs hover:underline" onClick={() => advance(r, 'In Progress')}>Start</button>}
+          {canUpdate && r.status !== 'Closed' && <button className="text-slate-500 text-xs hover:underline" onClick={() => advance(r, 'Closed')}>Close</button>}
         </div>
       ),
     },
@@ -48,7 +51,7 @@ export function SupportList() {
   return (
     <>
       <PageHeader title="Post-Install Support" subtitle="Faults, questions and warranty work after handover">
-        <button className="btn-primary" onClick={() => setShowNew(true)}>+ New Ticket</button>
+        {can('tickets', 'create') && <button className="btn-primary" onClick={() => setShowNew(true)}>+ New Ticket</button>}
       </PageHeader>
 
       <Banner onDismiss={() => setError('')}>{error}</Banner>
@@ -129,6 +132,7 @@ export function GrantsList() {
   const [showNew, setShowNew] = useState(false)
   const navigate = useNavigate()
   const { data, loading, error, reload } = useFetch('/grants' + qs({ status }))
+  const { can } = useAuth()
 
   const columns = [
     { key: 'installation', header: 'Installation', render: (r) => <span className="font-medium text-slate-900">{r.installation?.installNo || '--'}</span> },
@@ -146,7 +150,7 @@ export function GrantsList() {
   return (
     <>
       <PageHeader title="OLEV Grant Submissions" subtitle="Government grant claims made on behalf of customers">
-        <button className="btn-primary" onClick={() => setShowNew(true)}>+ New Submission</button>
+        {can('grants', 'create') && <button className="btn-primary" onClick={() => setShowNew(true)}>+ New Submission</button>}
       </PageHeader>
 
       <Banner>{error}</Banner>
@@ -222,6 +226,7 @@ export function GrantSubmission() {
   const { id } = useParams()
   const navigate = useNavigate()
   const { data: grant, loading, reload } = useFetch('/grants/' + id)
+  const { can } = useAuth()
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [draft, setDraft] = useState(null)
@@ -303,12 +308,14 @@ export function GrantSubmission() {
             <textarea className="input" rows="3" value={current.comments || ''} onChange={(e) => update({ comments: e.target.value })} />
           </Field>
 
-          <div className="flex justify-end gap-2 pt-2">
-            <button className="btn-secondary" disabled={busy} onClick={() => saveAndSubmit(false)}>Save</button>
-            <button className="btn-primary" disabled={busy || current.status === 'Submitted'} onClick={() => saveAndSubmit(true)}>
-              {current.status === 'Submitted' ? 'Already Submitted' : busy ? 'Submitting...' : 'Submit to OLEV'}
-            </button>
-          </div>
+          {can('grants', 'update') ? (
+            <div className="flex justify-end gap-2 pt-2">
+              <button className="btn-secondary" disabled={busy} onClick={() => saveAndSubmit(false)}>Save</button>
+              <button className="btn-primary" disabled={busy || current.status === 'Submitted'} onClick={() => saveAndSubmit(true)}>
+                {current.status === 'Submitted' ? 'Already Submitted' : busy ? 'Submitting...' : 'Submit to OLEV'}
+              </button>
+            </div>
+          ) : <p className="pt-2 text-right text-sm text-slate-400">View only -- your role can't change grant claims.</p>}
         </div>
       </Card>
     </>

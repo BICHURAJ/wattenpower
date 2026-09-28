@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "node --watch src/index.js",
     "start": "node src/index.js",
+    "test": "node --test \"test/*.test.js\"",
     "seed": "node src/seed.js",
     "seed:mock": "node src/seedMock.js",
     "seed:mock:clear": "node src/seedMock.js --clear"

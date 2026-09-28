@@ -24,20 +24,85 @@ npm run dev             # start both the API and the web app
 - Web app: **http://localhost:5273**
 - API: **http://localhost:4000/api**
 
-Sign in with **david@wattenpower.co.uk** / **password123**.
-(Also `sarah@` for a sales role and `mike@` for an engineer role, same password.)
+`npm run seed` creates demo accounts (`david@` admin, `sarah@` sales, `mike@`
+engineer, `fiona@` finance, all `@wattenpower.co.uk`) and prints their password
+once at the end. It's random each run; set `SEED_PASSWORD` in `server/.env` to
+choose one. The seed refuses to run when `NODE_ENV=production`.
 
-Connection settings live in `server/.env`:
+On a fresh database with no seed, the first account created at `/signup`
+becomes the admin.
+
+Settings live in `server/.env` (git-ignored). Copy `server/.env.example` to
+`server/.env`, then set `JWT_SECRET` to a random value of your own:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
+```
 
 ```
 MONGODB_URI=mongodb://127.0.0.1:27017/watten_power
 PORT=4000
-JWT_SECRET=change-me-in-production
+JWT_SECRET=<paste the generated value>
+CORS_ALLOWED_ORIGINS=http://localhost:5273
 ```
+
+The API refuses to start if `JWT_SECRET` is missing, shorter than 32 bytes, or
+a placeholder such as `dev-secret`. Run the server tests with `npm --prefix server test`.
 
 > The web app runs on port **5273** rather than Vite's default 5173, because
 > another project on this machine already uses that origin and its cached
 > service worker will serve the wrong app.
+
+## Run with Docker
+
+Two containers from one `docker-compose.yml`:
+
+- **web** — nginx serving the built React app on **http://localhost:8080**, and
+  forwarding `/api` (including the live message stream) to the API.
+- **api** — the Express server. It is not published on its own port; only
+  `web` talks to it.
+
+MongoDB is **not** in Docker: the API connects to your existing database.
+
+```bash
+cp docker.env.example docker.env   # then fill in JWT_SECRET (and MONGODB_URI if needed)
+docker compose up -d --build       # build and start both containers
+docker compose ps                  # api should say "healthy"
+docker compose logs -f api         # look for "[db] connected to ..."
+docker compose down                # stop and remove the containers (data stays in MongoDB)
+```
+
+`docker.env` holds secrets and is git-ignored. `docker.env.example` shows every
+setting. `NODE_ENV=production`, `PORT` and `TRUST_PROXY=1` (so the API sees
+visitors' real IPs behind nginx) are set in `docker-compose.yml`.
+
+**Reaching MongoDB on this machine:** `MONGODB_URI` uses
+`mongodb://host.docker.internal:27017/...`, which is this computer as seen from
+a container. With Docker Desktop that works out of the box. On a Linux server,
+MongoDB must also listen on the Docker bridge address (`net.bindIp` in
+`mongod.conf`) — or use a hosted database such as MongoDB Atlas.
+
+**Mock data:** `docker compose run --rm -e NODE_ENV=development api node src/seedMock.js`
+(adds the 50 mock installations; `--clear` removes them). The full `seed.js`
+wipes the database, so it refuses to run in production mode.
+
+## Deploying
+
+Set these environment variables on the server. Never reuse the development
+values, and give each environment (staging, production) its own secret.
+
+| Variable | Required | Notes |
+|----------|----------|-------|
+| `NODE_ENV` | yes | `production` -- turns on the strict checks below. |
+| `JWT_SECRET` | yes | At least 32 bytes of random data (see the command above). Changing it signs everyone out. |
+| `CORS_ALLOWED_ORIGINS` | yes in production | Comma-separated exact origins that may call the API from a browser, e.g. `https://app.wattenpower.co.uk`. No `*`, no paths or trailing slashes. |
+| `MONGODB_URI` | yes | The production database. |
+| `PORT` | no | Defaults to 4000. |
+
+The API checks `JWT_SECRET` and `CORS_ALLOWED_ORIGINS` before connecting to the
+database and exits with a clear message if either is wrong. Login tokens are
+HS256-signed, expire after 7 days, and tokens using any other algorithm
+(including `none`) are rejected.
 
 ## The screens
 

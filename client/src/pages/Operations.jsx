@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { api, qs, money, shortDate, inputDate } from '../api'
+import { useAuth } from '../auth'
 import { WEEK_DAYS, defaultWeek, scheduleOf, nextTimeOff, availabilityToday, hoursLabel, weekdayIndex } from '../availability'
 import {
   PageHeader, Card, Table, Badge, SearchInput, Select, Pagination, Field, Modal,
@@ -90,6 +91,7 @@ export function StockInventory() {
   const [showAdd, setShowAdd] = useState(false)
   const [error, setError] = useState('')
   const { data, loading, reload } = useFetch('/stock' + qs({ q: search, category, page }))
+  const { can } = useAuth()
 
   const adjust = async (item, delta) => {
     try {
@@ -116,10 +118,12 @@ export function StockInventory() {
     {
       key: 'actions', header: 'Actions',
       render: (r) => (
-        <div className="flex gap-1">
-          <button className="btn-secondary px-2 py-0.5 text-xs" onClick={() => adjust(r, -1)}>-</button>
-          <button className="btn-secondary px-2 py-0.5 text-xs" onClick={() => adjust(r, 1)}>+</button>
-        </div>
+        can('stock', 'update') ? (
+          <div className="flex gap-1">
+            <button className="btn-secondary px-2 py-0.5 text-xs" onClick={() => adjust(r, -1)}>-</button>
+            <button className="btn-secondary px-2 py-0.5 text-xs" onClick={() => adjust(r, 1)}>+</button>
+          </div>
+        ) : null
       ),
     },
   ]
@@ -127,7 +131,7 @@ export function StockInventory() {
   return (
     <>
       <PageHeader title="Stock & Inventory" subtitle="Parts held for jobs, ordered just in time from UK suppliers">
-        <button className="btn-primary" onClick={() => setShowAdd(true)}>+ Add Stock</button>
+        {can('stock', 'create') && <button className="btn-primary" onClick={() => setShowAdd(true)}>+ Add Stock</button>}
       </PageHeader>
 
       <Banner onDismiss={() => setError('')}>{error}</Banner>
@@ -235,13 +239,13 @@ function CalibrationBadge({ date }) {
   return <Badge tone={state.tone}>{state.tone === 'green' ? shortDate(date) : state.text}</Badge>
 }
 
-/** The "Tools" block on a van card. */
+/** The "Tools" block on a van card. Leave out an action to hide its control. */
 function VanToolsSection({ tools, onAdd, onEdit, onReturn }) {
   return (
     <section className="mt-2 rounded-xl border border-slate-100 bg-slate-50/60 p-3">
       <div className="flex items-center justify-between gap-2 mb-2">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tools ({tools.length})</h3>
-        <button type="button" className="text-xs font-medium text-brand-600 hover:underline" onClick={onAdd}>+ Add tool</button>
+        {onAdd && <button type="button" className="text-xs font-medium text-brand-600 hover:underline" onClick={onAdd}>+ Add tool</button>}
       </div>
       {tools.length === 0
         ? <p className="text-xs text-slate-400">No tools on this van.</p>
@@ -249,20 +253,22 @@ function VanToolsSection({ tools, onAdd, onEdit, onReturn }) {
           <ul className="divide-y divide-slate-100">
             {tools.map((tool) => (
               <li key={tool._id} className="flex items-center justify-between gap-2 py-1.5">
-                <button type="button" className="min-w-0 text-left" onClick={() => onEdit(tool)} title="Edit tool">
-                  <p className="text-sm text-slate-800 truncate hover:text-brand-600">{tool.name}</p>
+                <button type="button" className="min-w-0 text-left disabled:cursor-default" onClick={() => onEdit?.(tool)} disabled={!onEdit} title={onEdit ? 'Edit tool' : undefined}>
+                  <p className={'text-sm text-slate-800 truncate ' + (onEdit ? 'hover:text-brand-600' : '')}>{tool.name}</p>
                   {tool.serialNo && <p className="text-[11px] text-slate-400">{tool.serialNo}</p>}
                 </button>
                 <span className="flex items-center gap-2 shrink-0">
                   <CalibrationBadge date={tool.calibrationDue} />
-                  <button
-                    type="button"
-                    className="text-slate-300 hover:text-red-500 text-base leading-none"
-                    title="Take off this van (back to the store)"
-                    onClick={() => onReturn(tool)}
-                  >
-                    &times;
-                  </button>
+                  {onReturn && (
+                    <button
+                      type="button"
+                      className="text-slate-300 hover:text-red-500 text-base leading-none"
+                      title="Take off this van (back to the store)"
+                      onClick={() => onReturn(tool)}
+                    >
+                      &times;
+                    </button>
+                  )}
                 </span>
               </li>
             ))}
@@ -309,7 +315,7 @@ function AddToolToVanModal({ van, tools, onAssign, onNew, onClose }) {
           ))}
         </ul>
         <div className="flex justify-between gap-2 pt-1">
-          <button type="button" className="btn-secondary" onClick={onNew}>+ New tool</button>
+          {onNew ? <button type="button" className="btn-secondary" onClick={onNew}>+ New tool</button> : <span />}
           <button type="button" className="btn-ghost" onClick={onClose}>Close</button>
         </div>
       </div>
@@ -321,6 +327,7 @@ const TOOL_STATUSES = ['In Service', 'Calibration Due', 'Out of Service']
 
 /** Add or edit a tool, including which van it's on. */
 function ToolModal({ tool, presetVan, vans, onClose, onSaved }) {
+  const { can } = useAuth()
   const isNew = !tool._id
   const [form, setForm] = useState(() => ({
     name: tool.name || '',
@@ -382,7 +389,7 @@ function ToolModal({ tool, presetVan, vans, onClose, onSaved }) {
           <Field label="Calibration Due"><input className="input" type="date" value={form.calibrationDue} onChange={set('calibrationDue')} /></Field>
         </div>
         <div className="flex items-center justify-between gap-2 pt-2">
-          {!isNew
+          {!isNew && can('tools', 'delete')
             ? <button type="button" className="text-sm text-red-600 hover:underline disabled:opacity-50" onClick={remove} disabled={busy}>Delete tool</button>
             : <span />}
           <div className="flex gap-2">
@@ -403,6 +410,8 @@ export function VansTools() {
   const [editingTool, setEditingTool] = useState(null) // null = closed, { tool, van } = open
   const [addingToVan, setAddingToVan] = useState(null) // van whose "add tool" picker is open
   const [toolError, setToolError] = useState('')
+  const { can } = useAuth()
+  const canEditTools = can('tools', 'update')
 
   const vanList = vans.data?.items || []
   const toolList = tools.data?.items || []
@@ -423,7 +432,7 @@ export function VansTools() {
   return (
     <>
       <PageHeader title="Vans & Tools" subtitle="What each engineer is driving and carrying">
-        {tab === 'Vans' && <button className="btn-primary" onClick={() => setEditingVan({})}>+ Add Van</button>}
+        {tab === 'Vans' && can('vans', 'create') && <button className="btn-primary" onClick={() => setEditingVan({})}>+ Add Van</button>}
       </PageHeader>
 
       <Tabs tabs={['Vans', 'Tools']} active={tab} onChange={setTab} />
@@ -445,7 +454,7 @@ export function VansTools() {
                       <p className="font-semibold text-slate-900">{[van.name, van.regNo].filter(Boolean).join(' - ')}</p>
                       <p className="text-sm text-slate-500">{van.model || '--'}</p>
                     </div>
-                    <button className="btn-secondary px-2.5 py-1 text-xs shrink-0" onClick={() => setEditingVan(van)}>Edit</button>
+                    {can('vans', 'update') && <button className="btn-secondary px-2.5 py-1 text-xs shrink-0" onClick={() => setEditingVan(van)}>Edit</button>}
                   </div>
                   <dl className="space-y-1.5 text-sm mb-3">
                     <div className="flex justify-between"><dt className="text-slate-500">Engineer</dt><dd className="text-slate-800">{van.engineer?.name || 'Unassigned'}</dd></div>
@@ -463,9 +472,9 @@ export function VansTools() {
                   </div>
                   <VanToolsSection
                     tools={toolsOnVan(van)}
-                    onAdd={() => setAddingToVan(van)}
-                    onEdit={(tool) => setEditingTool({ tool, van })}
-                    onReturn={(tool) => assignTool(tool, null)}
+                    onAdd={canEditTools ? () => setAddingToVan(van) : undefined}
+                    onEdit={canEditTools ? (tool) => setEditingTool({ tool, van }) : undefined}
+                    onReturn={canEditTools ? (tool) => assignTool(tool, null) : undefined}
                   />
                   {van.notes && <p className="mt-3 text-xs text-slate-500 whitespace-pre-line">{van.notes}</p>}
                 </Card>
@@ -488,7 +497,7 @@ export function VansTools() {
           van={addingToVan}
           tools={toolList}
           onAssign={async (tool) => { await assignTool(tool, addingToVan); setAddingToVan(null) }}
-          onNew={() => { setEditingTool({ tool: {}, van: addingToVan }); setAddingToVan(null) }}
+          onNew={can('tools', 'create') ? () => { setEditingTool({ tool: {}, van: addingToVan }); setAddingToVan(null) } : undefined}
           onClose={() => setAddingToVan(null)}
         />
       )}
@@ -508,9 +517,11 @@ export function VansTools() {
       {tab === 'Tools' && (
         tools.loading ? <Loading /> : (
           <>
-            <div className="flex justify-end mb-3">
-              <button className="btn-primary" onClick={() => setEditingTool({ tool: {}, van: null })}>+ Add Tool</button>
-            </div>
+            {can('tools', 'create') && (
+              <div className="flex justify-end mb-3">
+                <button className="btn-primary" onClick={() => setEditingTool({ tool: {}, van: null })}>+ Add Tool</button>
+              </div>
+            )}
             <Card bodyClass="">
               <Table
                 columns={[
@@ -522,7 +533,7 @@ export function VansTools() {
                   { key: 'status', header: 'Status', render: (r) => <Badge>{r.status}</Badge> },
                 ]}
                 rows={toolList}
-                onRowClick={(r) => setEditingTool({ tool: r, van: r.van || null })}
+                onRowClick={canEditTools ? (r) => setEditingTool({ tool: r, van: r.van || null }) : undefined}
                 empty="No tools recorded."
               />
             </Card>
@@ -554,6 +565,7 @@ const vanForm = (van) => ({
 
 /** Add or edit a van: details, MOT and insurance. */
 function VanModal({ van, onClose, onSaved }) {
+  const { can } = useAuth()
   const isNew = !van._id
   const engineers = useFetch('/engineers' + qs({ limit: 200 }))
   const [form, setForm] = useState(() => vanForm(van))
@@ -643,7 +655,7 @@ function VanModal({ van, onClose, onSaved }) {
         <Field label="Notes"><textarea className="input min-h-[70px]" value={form.notes} onChange={set('notes')} /></Field>
 
         <div className="flex items-center justify-between gap-2 pt-2">
-          {!isNew
+          {!isNew && can('vans', 'delete')
             ? <button type="button" className="text-sm text-red-600 hover:underline disabled:opacity-50" onClick={remove} disabled={busy}>Delete van</button>
             : <span />}
           <div className="flex gap-2">
@@ -662,6 +674,7 @@ const ENGINEER_ROLES =['Installation Engineer', 'Senior Engineer', 'Surveyor', '
 // Screen: Engineers -- who we have, and when they can be booked.
 export function Engineers() {
   const { data, loading, error, reload } = useFetch('/engineers' + qs({ limit: 100 }))
+  const { can } = useAuth()
   const [filter, setFilter] = useState('All')
   const [search, setSearch] = useState('')
   const [editing, setEditing] = useState(null) // null = closed, {} = new, engineer = edit
@@ -678,7 +691,7 @@ export function Engineers() {
   return (
     <>
       <PageHeader title="Engineers" subtitle="The people who carry out surveys, installs and repairs, and when they're free">
-        <button className="btn-primary" onClick={() => setEditing({})}>+ Add Engineer</button>
+        {can('engineers', 'create') && <button className="btn-primary" onClick={() => setEditing({})}>+ Add Engineer</button>}
       </PageHeader>
       <Banner>{error}</Banner>
 
@@ -757,7 +770,7 @@ export function Engineers() {
               )}
 
               <div className="mt-auto pt-4">
-                <button className="btn-secondary w-full justify-center px-3 py-2 text-xs" onClick={() => setEditing(engineer)}>Edit details &amp; availability</button>
+                {can('engineers', 'update') && <button className="btn-secondary w-full justify-center px-3 py-2 text-xs" onClick={() => setEditing(engineer)}>Edit details &amp; availability</button>}
               </div>
             </Card>
           )

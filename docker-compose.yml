@@ -1,0 +1,31 @@
+# Two containers: "web" (nginx + the built React app, on http://localhost:8080)
+# and "api" (Express). MongoDB is NOT in Docker: the api connects to it via
+# MONGODB_URI in docker.env (copy docker.env.example to docker.env first).
+#
+#   docker compose up -d --build     build and start
+#   docker compose logs -f api       follow the API log
+#   docker compose down              stop and remove the containers
+
+services:
+  api:
+    build: ./server
+    env_file: docker.env
+    environment:
+      NODE_ENV: production
+      PORT: "4000"
+      TRUST_PROXY: "1" # one proxy in front (nginx), so rate limits see the real visitor IP
+    # Lets the container reach MongoDB running on this machine (also on Linux).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    init: true # passes stop signals to Node, so `docker compose stop` is quick
+    restart: unless-stopped
+    # No ports published: only the web container talks to the API.
+
+  web:
+    build: ./client
+    ports:
+      - "8080:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped

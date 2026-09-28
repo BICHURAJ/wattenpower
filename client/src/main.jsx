@@ -7,6 +7,9 @@ import { AuthProvider, RequireAuth } from './auth'
 import Layout from './components/Layout'
 
 import Login from './pages/Login'
+import Signup from './pages/Signup'
+import Users from './pages/Users'
+import Messages from './pages/Messages'
 import Dashboard from './pages/Dashboard'
 import { ClientsList, ClientDetails } from './pages/Clients'
 import LeadCapture, { LeadsList } from './pages/LeadCapture'
@@ -14,7 +17,7 @@ import { QuotationsList, QuotationCreate, QuotationEdit, QuotationDetails } from
 import { InstallationsList, InstallationDetails, InstallationCertification } from './pages/Installations'
 import { SupportList, GrantsList, GrantSubmission } from './pages/Support'
 import { ComplianceHub, StockInventory, VansTools, Engineers, DocumentsPage } from './pages/Operations'
-import { Reports, Settings } from './pages/Misc'
+import { Reports } from './pages/Misc'
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
@@ -22,6 +25,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
       <AuthProvider>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/signup" element={<Signup />} />
           {/* Screen 5 doubles as the public website form -- no sign-in needed. */}
           <Route path="/lead-capture" element={<LeadCapture />} />
 
@@ -46,8 +50,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             <Route path="stock" element={<StockInventory />} />
             <Route path="vans" element={<VansTools />} />
             <Route path="reports" element={<Reports />} />
-            <Route path="settings" element={<Settings />} />
-          </Route>
+            <Route path="users" element={<Users />} />
+            <Route path="messages" element={<Messages />} />
+            <Route path="messages/:id" element={<Messages />} />          </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

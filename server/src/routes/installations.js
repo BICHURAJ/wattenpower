@@ -7,6 +7,7 @@ import Ticket from '../models/Ticket.js'
 import Activity from '../models/Activity.js'
 import { crudRouter } from '../middleware/crud.js'
 import { syncInstallation } from '../quoteProgress.js'
+import { userCan } from '../permissions.js'
 
 const router = express.Router()
 
@@ -31,7 +32,22 @@ router.post('/:id/dno-notify', async (req, res, next) => {
 })
 
 // Put a job on hold (with an optional reason), and resume it at the status it had.
-router.post('/:id/hold', async (req, res, next) => {
+// Moving a job along is the engineers' job (admins can too): see
+// installationProgress in permissions.js. Others can still book and edit jobs.
+const PROGRESS_FIELDS = ['progress', 'status', 'tasks', 'hold', 'completedAt']
+
+function requireProgressRight(req, res, next) {
+  if (userCan(req.user, 'installationProgress', 'update')) return next()
+  res.status(403).json({ error: 'Only engineers can change the progress of a job.' })
+}
+// For plain create/update requests: only checked when they touch progress fields.
+const guardProgressFields = (req, res, next) =>
+  (PROGRESS_FIELDS.some((field) => field in (req.body || {})) ? requireProgressRight(req, res, next) : next())
+
+router.post('/', guardProgressFields)
+router.put('/:id', guardProgressFields)
+
+router.post('/:id/hold', requireProgressRight, async (req, res, next) => {
   try {
     const install = await Installation.findById(req.params.id)
     if (!install) return res.status(404).json({ error: 'Installation not found' })
@@ -54,7 +70,7 @@ router.post('/:id/hold', async (req, res, next) => {
   } catch (err) { next(err) }
 })
 
-router.post('/:id/resume', async (req, res, next) => {
+router.post('/:id/resume', requireProgressRight, async (req, res, next) => {
   try {
     const install = await Installation.findById(req.params.id)
     if (!install) return res.status(404).json({ error: 'Installation not found' })
@@ -84,7 +100,7 @@ router.get('/:id/certification', async (req, res, next) => {
 
 // Screen 11: save the electrical installation certificate. Marking it complete
 // closes the job out and pushes the installation to "Completed".
-router.post('/:id/certification', async (req, res, next) => {
+router.post('/:id/certification', requireProgressRight, async (req, res, next) => {
   try {
     const install = await Installation.findById(req.params.id)
     if (!install) return res.status(404).json({ error: 'Installation not found' })

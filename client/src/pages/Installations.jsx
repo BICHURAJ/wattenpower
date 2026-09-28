@@ -5,6 +5,7 @@ import {
   PageHeader, Card, Table, Badge, SearchInput, Select, Pagination, Field, Modal,
   Tabs, Banner, Loading, useFetch,
 } from '../components/ui'
+import { useAuth } from '../auth'
 import LocationPicker from '../components/LocationPicker'
 import { LocationPanel, LocationModal } from '../components/LocationPanel'
 import { directionsUrl } from '../components/LocationPicker'
@@ -55,7 +56,7 @@ const segmentClass = (active) =>
   (active ? 'bg-white text-brand-700 shadow-sm' : 'text-slate-500 hover:text-slate-700')
 
 /** One installation as a card: where it is on top, then the job details. */
-function InstallationCard({ install, where, locating, base, onOpen, onDelete, deleting }) {
+function InstallationCard({ install, where, locating, base, onOpen, onDelete, deleting }) { // onDelete omitted = no Delete button
   const done = progressOf(install)
   const colour = pinColour(install)
   const address = where?.address || [install.address, install.postcode].filter(Boolean).join(', ') || install.site
@@ -111,14 +112,16 @@ function InstallationCard({ install, where, locating, base, onOpen, onDelete, de
           {where && <a href={directionsUrl(where)} target="_blank" rel="noopener noreferrer" className="text-brand-600 hover:underline" onClick={stop}>Directions</a>}
           {where && <a href={streetViewUrl(where.lat, where.lng)} target="_blank" rel="noopener noreferrer" className="text-brand-600 hover:underline" onClick={stop}>Street View</a>}
         </span>
-        <button
-          className="inline-flex items-center gap-1 text-slate-400 hover:text-red-600 disabled:opacity-50"
-          title={'Delete ' + install.installNo}
-          disabled={deleting}
-          onClick={(e) => { stop(e); onDelete() }}
-        >
-          <TrashIcon /> {deleting ? 'Deleting...' : 'Delete'}
-        </button>
+        {onDelete && (
+          <button
+            className="inline-flex items-center gap-1 text-slate-400 hover:text-red-600 disabled:opacity-50"
+            title={'Delete ' + install.installNo}
+            disabled={deleting}
+            onClick={(e) => { stop(e); onDelete() }}
+          >
+            <TrashIcon /> {deleting ? 'Deleting...' : 'Delete'}
+          </button>
+        )}
       </div>
     </div>
   )
@@ -142,6 +145,8 @@ export function InstallationsList() {
   const { prefs, setBase } = useMapPrefs(noMap)
   const rows = data?.items || []
   const { locations, loading: locating } = useInstallationLocations(rows)
+  const { can } = useAuth()
+  const canDelete = can('installations', 'delete')
 
   const remove = async (row) => {
     setActionError('')
@@ -171,14 +176,16 @@ export function InstallationsList() {
       render: (r) => (
         <span className="flex items-center gap-3">
           <Link to={'/installations/' + r._id} className="text-brand-600 text-sm hover:underline" onClick={(e) => e.stopPropagation()}>View</Link>
-          <button
-            className="inline-flex items-center gap-1 text-sm text-slate-400 hover:text-red-600 disabled:opacity-50"
-            title={'Delete ' + r.installNo}
-            disabled={deletingId === r._id}
-            onClick={(e) => { e.stopPropagation(); remove(r) }}
-          >
-            <TrashIcon /> {deletingId === r._id ? 'Deleting...' : 'Delete'}
-          </button>
+          {canDelete && (
+            <button
+              className="inline-flex items-center gap-1 text-sm text-slate-400 hover:text-red-600 disabled:opacity-50"
+              title={'Delete ' + r.installNo}
+              disabled={deletingId === r._id}
+              onClick={(e) => { e.stopPropagation(); remove(r) }}
+            >
+              <TrashIcon /> {deletingId === r._id ? 'Deleting...' : 'Delete'}
+            </button>
+          )}
         </span>
       ),
     },
@@ -187,7 +194,7 @@ export function InstallationsList() {
   return (
     <>
       <PageHeader title="Installations" subtitle="Every job from survey through to handover">
-        <button className="btn-primary" onClick={() => setShowNew(true)}>+ New Installation</button>
+        {can('installations', 'create') && <button className="btn-primary" onClick={() => setShowNew(true)}>+ New Installation</button>}
       </PageHeader>
 
       <Banner>{error}</Banner>
@@ -230,7 +237,7 @@ export function InstallationsList() {
                       locating={locating}
                       base={prefs.base}
                       onOpen={() => navigate('/installations/' + r._id)}
-                      onDelete={() => remove(r)}
+                      onDelete={canDelete ? () => remove(r) : undefined}
                       deleting={deletingId === r._id}
                     />
                   ))}
@@ -276,6 +283,9 @@ const installationForm = (install) => {
 /** Creates a new installation, or edits `install` when one is passed. */
 function InstallationFormModal({ open, install, onClose, onSaved }) {
   const editing = Boolean(install)
+  // Status is part of the job's progress: engineers (and admins) only.
+  const { can } = useAuth()
+  const canProgress = can('installationProgress', 'update')
   const clients = useFetch('/clients' + qs({ limit: 200 }))
   const engineers = useFetch('/engineers' + qs({ limit: 200 }))
   const [form, setForm] = useState(() => (editing ? installationForm(install) : emptyInstallation()))
@@ -350,6 +360,7 @@ function InstallationFormModal({ open, install, onClose, onSaved }) {
     setBusy(true)
     try {
       const payload = { ...form }
+      if (!canProgress) delete payload.status
       if (editing) {
         // null (not a missing key) so unassigning an engineer or clearing the pin sticks.
         payload.engineer = payload.engineer || null
@@ -401,7 +412,7 @@ function InstallationFormModal({ open, install, onClose, onSaved }) {
             <datalist id="client-sites">{(selectedClient?.sites || []).map((s) => <option key={s._id || s.name} value={s.name} />)}</datalist>
           </Field>
           <Field label="Install Date"><input className="input" type="date" value={form.installDate} onChange={set('installDate')} /></Field>
-          {editing && (
+          {editing && canProgress && (
             <Field label="Status">
               <select className="input" value={form.status} onChange={set('status')}>
                 {EDIT_STATUSES.map((s) => <option key={s}>{s}</option>)}
@@ -463,6 +474,11 @@ export function InstallationDetails() {
   const [deleting, setDeleting] = useState(false)
   const [editing, setEditing] = useState(false)
   const [editingLocation, setEditingLocation] = useState(null) // null = closed, { start } = open
+  const { can } = useAuth()
+  // Roles without update rights (finance) see the job read-only.
+  const canEdit = can('installations', 'update')
+  // Progress steps, tasks and hold/resume: engineers (and admins) only.
+  const canProgress = can('installationProgress', 'update')
 
   if (loading) return <Loading />
   if (!install) return <Banner>Installation not found.</Banner>
@@ -537,12 +553,16 @@ export function InstallationDetails() {
     <>
       <PageHeader title={'Installation ' + install.installNo} subtitle={install.client?.name}>
         <Link to="/installations" className="btn-secondary">Back</Link>
-        <button className="btn-secondary" onClick={() => setEditing(true)}>
-          <EditIcon /> Edit
-        </button>
-        <button className="btn-secondary text-red-600 hover:bg-red-50 hover:border-red-200" onClick={remove} disabled={deleting}>
-          <TrashIcon /> {deleting ? 'Deleting...' : 'Delete'}
-        </button>
+        {canEdit && (
+          <button className="btn-secondary" onClick={() => setEditing(true)}>
+            <EditIcon /> Edit
+          </button>
+        )}
+        {can('installations', 'delete') && (
+          <button className="btn-secondary text-red-600 hover:bg-red-50 hover:border-red-200" onClick={remove} disabled={deleting}>
+            <TrashIcon /> {deleting ? 'Deleting...' : 'Delete'}
+          </button>
+        )}
         <Link to={'/installations/' + id + '/certification'} className="btn-primary">Certification</Link>
       </PageHeader>
 
@@ -606,6 +626,7 @@ export function InstallationDetails() {
                     location={install.coordinates || (!ownAddress ? install.client?.location : null)}
                     onEdit={(start) => setEditingLocation({ start })}
                     onKeepApprox={(point) => saveLocation({ address: jobAddress || '', postcode: jobPostcode || '', location: point })}
+                    readOnly={!canEdit}
                   />
                 </div>
               </dl>
@@ -616,7 +637,7 @@ export function InstallationDetails() {
                 {(install.tasks || []).length === 0 && <p className="py-6 text-sm text-slate-400 text-center">No tasks added to this job.</p>}
                 {(install.tasks || []).map((task) => (
                   <label key={task._id} className="flex items-center gap-3 py-2.5 text-sm cursor-pointer">
-                    <input type="checkbox" className="rounded border-slate-300" checked={task.done} onChange={() => toggleTask(task._id)} />
+                    <input type="checkbox" className="rounded border-slate-300" checked={task.done} disabled={!canProgress} onChange={() => toggleTask(task._id)} />
                     <span className={task.done ? 'line-through text-slate-400' : 'text-slate-700'}>{task.title}</span>
                   </label>
                 ))}
@@ -634,7 +655,7 @@ export function InstallationDetails() {
                   </div>
                   {install.dnoNotified
                     ? <Badge tone="green">Sent {shortDate(install.dnoNotifiedAt)}</Badge>
-                    : <button className="btn-primary" onClick={notifyDno}>Notify DNO</button>}
+                    : canEdit ? <button className="btn-primary" onClick={notifyDno}>Notify DNO</button> : <Badge tone="amber">Not sent</Badge>}
                 </div>
                 <ul className="text-sm text-slate-600 space-y-1.5 list-disc pl-5">
                   <li>IET Wiring Regulations (18th Edition, BS 7671)</li>
@@ -650,7 +671,7 @@ export function InstallationDetails() {
 
         <Card
           title="Progress"
-          action={canHold && (
+          action={canHold && canProgress && (
             <button
               className={onHold ? 'btn-primary text-xs px-2.5 py-1' : 'btn-secondary text-xs px-2.5 py-1'}
               onClick={toggleHold}
@@ -665,6 +686,11 @@ export function InstallationDetails() {
               {install.hold?.reason && <p className="mt-0.5">{install.hold.reason}</p>}
               <p className="mt-0.5 text-slate-500">Progress is frozen until the job is resumed.</p>
             </div>
+          )}
+          {!canProgress && (
+            <p className="mb-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+              Progress is updated by the engineers on the job.
+            </p>
           )}
           {!quoteAccepted && (
             <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
@@ -686,7 +712,7 @@ export function InstallationDetails() {
               // Driven by the quotation status, so never ticked by hand.
               const fromQuote = isQuoteStep
               const final = done && FINAL_STEPS.includes(key)
-              const disabled = locked || fromQuote || final || onHold
+              const disabled = locked || fromQuote || final || onHold || !canProgress
               let hint = done ? 'Completed' : 'Pending'
               if (locked) hint = 'Waiting for quote acceptance'
               if (onHold && !done && !fromQuote) hint = 'On hold'
@@ -721,6 +747,7 @@ export function InstallationCertification() {
   const { id } = useParams()
   const navigate = useNavigate()
   const install = useFetch('/installations/' + id)
+  const { can } = useAuth()
   const [form, setForm] = useState(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -836,8 +863,12 @@ export function InstallationCertification() {
       </div>
 
       <div className="flex justify-end gap-2 mt-4 max-w-4xl">
-        <button className="btn-secondary" disabled={busy} onClick={() => save(false)}>Save Draft</button>
-        <button className="btn-primary" disabled={busy} onClick={() => save(true)}>{busy ? 'Saving...' : 'Save & Complete'}</button>
+        {can('installationProgress', 'update') ? (
+          <>
+            <button className="btn-secondary" disabled={busy} onClick={() => save(false)}>Save Draft</button>
+            <button className="btn-primary" disabled={busy} onClick={() => save(true)}>{busy ? 'Saving...' : 'Save & Complete'}</button>
+          </>
+        ) : <p className="text-sm text-slate-400">View only -- certificates are completed by engineers.</p>}
       </div>
     </>
   )

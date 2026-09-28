@@ -58,6 +58,8 @@ export async function exportOverviewPdf({ data, reports, user, map }) {
   const [{ jsPDF }, { default: autoTable }, logo] = await Promise.all([import('jspdf'), import('jspdf-autotable'), loadLogo()])
 
   const s = summarise(data, reports)
+  // Quote money is for admin and finance only (the server leaves it out for others too).
+  const showValues = Boolean(user?.permissions?.quoteValues)
   const { stats, upcoming, activities, expiring } = data
   const doc = new jsPDF({ unit: 'pt', format: 'a4' })
   const pageW = doc.internal.pageSize.getWidth()
@@ -155,8 +157,8 @@ export async function exportOverviewPdf({ data, reports, user, map }) {
   }
 
   table(
-    ['STATUS', 'QUOTES', 'VALUE'],
-    s.pipeline.map((p) => [p.label, String(p.count), money(p.amount)]),
+    showValues ? ['STATUS', 'QUOTES', 'VALUE'] : ['STATUS', 'QUOTES'],
+    s.pipeline.map((p) => (showValues ? [p.label, String(p.count), money(p.amount)] : [p.label, String(p.count)])),
     { columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' } } },
   )
 
@@ -165,7 +167,7 @@ export async function exportOverviewPdf({ data, reports, user, map }) {
   table(
     ['STATUS', 'INSTALLATIONS', 'SHARE'],
     s.installs.map((i) => [i._id || 'Unset', String(i.count), (s.installTotal ? (i.count / s.installTotal) * 100 : 0).toFixed(1) + '%'])
-      .concat([[{ content: 'Accepted quote value', styles: { fontStyle: 'bold' } }, '', { content: money(s.acceptedValue), styles: { fontStyle: 'bold' } }]]),
+      .concat(showValues ? [[{ content: 'Accepted quote value', styles: { fontStyle: 'bold' } }, '', { content: money(s.acceptedValue), styles: { fontStyle: 'bold' } }]] : []),
     { columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' } }, empty: 'No installations yet.' },
   )
 
@@ -224,10 +226,12 @@ export async function exportOverviewPdf({ data, reports, user, map }) {
     { columnStyles: { 4: { halign: 'right' } }, empty: 'Everything is in date.' },
   )
 
-  sectionTitle('Recent activity', null, activities.length)
+  // The Overview can load up to 50; the report keeps the latest 10.
+  const recent = activities.slice(0, 10)
+  sectionTitle('Recent activity', null, recent.length)
   table(
     ['ACTIVITY', 'BY', 'WHEN'],
-    activities.map((a) => [a.text, a.by || '-', shortDate(a.createdAt)]),
+    recent.map((a) => [a.text, a.by || '-', shortDate(a.createdAt)]),
     { columnStyles: { 0: { cellWidth: contentW * 0.6 }, 2: { halign: 'right' } }, empty: 'No activity recorded yet.' },
   )
 

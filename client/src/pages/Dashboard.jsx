@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { money, qs, shortDate, timeAgo } from '../api'
 import { availabilityOn, localDayKey } from '../availability'
@@ -16,6 +16,51 @@ const ICONS = {
 }
 
 const initials = (name = '') => name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '—'
+
+const ACTIVITY_VISIBLE = 10
+
+/**
+ * The activity timeline: shows the first 10 entries, then scrolls. The height
+ * is measured from the 10th entry, since entries wrap to different heights.
+ */
+function ActivityList({ items, showWho }) {
+  const listRef = useRef(null)
+  const [maxHeight, setMaxHeight] = useState(null)
+
+  useLayoutEffect(() => {
+    const list = listRef.current
+    if (!list || items.length <= ACTIVITY_VISIBLE) { setMaxHeight(null); return }
+    const measure = () => {
+      const last = list.children[ACTIVITY_VISIBLE - 1]
+      if (last) setMaxHeight(last.offsetTop + last.offsetHeight)
+    }
+    measure()
+    window.addEventListener('resize', measure)
+    return () => window.removeEventListener('resize', measure)
+  }, [items])
+
+  return (
+    <div
+      className={maxHeight ? 'overflow-y-auto pr-1 -mr-1 overscroll-contain' : ''}
+      style={maxHeight ? { maxHeight } : undefined}
+    >
+      <ol ref={listRef} className="relative border-l border-slate-100 ml-1">
+        {items.map((item) => (
+          <li key={item._id} className="relative pl-5 pb-4 last:pb-1">
+            <span className="absolute -left-[5px] top-1.5 w-2.5 h-2.5 rounded-full bg-white ring-2 ring-brand-400" />
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm text-slate-700">{item.text}</p>
+                {item.by && showWho && <p className="text-xs text-slate-400 mt-0.5">by {item.by}</p>}
+              </div>
+              <span className="text-xs text-slate-400 whitespace-nowrap">{timeAgo(item.createdAt)}</span>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </div>
+  )
+}
 
 function ViewAll({ to }) {
   return (
@@ -169,7 +214,7 @@ export default function Dashboard() {
   const { data: engineerData } = useFetch('/engineers' + qs({ limit: 200 }))
   const { data: installData } = useFetch('/installations' + qs({ limit: 200 }))
   const [mapFilter, setMapFilter] = useState('Active')
-  const { user } = useAuth()
+  const { user, can } = useAuth()
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState('')
   // Where each installation is, for the map in the exported PDF (postcode lookups are cached, so this is cheap).
@@ -272,7 +317,9 @@ export default function Dashboard() {
           <ul className="mt-6 space-y-3 text-sm">
             <li className="flex items-center justify-between"><span className="flex items-center gap-2 text-slate-500"><span className="w-2 h-2 rounded-full bg-brand-500" />Completed</span><span className="font-medium text-slate-800">{completed}</span></li>
             <li className="flex items-center justify-between"><span className="flex items-center gap-2 text-slate-500"><span className="w-2 h-2 rounded-full bg-brand-200" />Scheduled / in progress</span><span className="font-medium text-slate-800">{active}</span></li>
-            <li className="flex items-center justify-between"><span className="flex items-center gap-2 text-slate-500"><span className="w-2 h-2 rounded-full bg-amber-500" />Accepted quote value</span><span className="font-medium text-slate-800">{money(acceptedValue)}</span></li>
+            {can('quoteValues') && (
+              <li className="flex items-center justify-between"><span className="flex items-center gap-2 text-slate-500"><span className="w-2 h-2 rounded-full bg-amber-500" />Accepted quote value</span><span className="font-medium text-slate-800">{money(acceptedValue)}</span></li>
+            )}
           </ul>
         </Card>
       </div>
@@ -415,22 +462,16 @@ export default function Dashboard() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card title="Recent activity" subtitle="Live across the business" bodyClass="px-5 pb-3" action={<ViewAll to="/quotations" />}>
-          {activities.length === 0 && <p className="py-6 text-sm text-slate-400">No activity recorded yet.</p>}
-          <ol className="relative border-l border-slate-100 ml-1">
-            {activities.map((item) => (
-              <li key={item._id} className="relative pl-5 pb-4 last:pb-1">
-                <span className="absolute -left-[5px] top-1.5 w-2.5 h-2.5 rounded-full bg-white ring-2 ring-brand-400" />
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm text-slate-700">{item.text}</p>
-                    {item.by && <p className="text-xs text-slate-400 mt-0.5">by {item.by}</p>}
-                  </div>
-                  <span className="text-xs text-slate-400 whitespace-nowrap">{timeAgo(item.createdAt)}</span>
-                </div>
-              </li>
-            ))}
-          </ol>
+        <Card
+          title={can('allActivity') ? 'Recent activity' : 'Your recent activity'}
+          subtitle={can('allActivity') ? 'Live across the business' : 'What you have done lately'}
+          bodyClass="px-5 pb-3"
+          action={<ViewAll to="/quotations" />}
+        >
+          {activities.length === 0 && (
+            <p className="py-6 text-sm text-slate-400">{can('allActivity') ? 'No activity recorded yet.' : "Nothing yet. Things you do, like adding a client or updating a job, will show here."}</p>
+          )}
+          <ActivityList items={activities} showWho={can('allActivity')} />
         </Card>
 
         <Card title="Compliance needing attention" subtitle="Expiring or expired" bodyClass="px-2 pb-2" action={<ViewAll to="/compliance" />}>

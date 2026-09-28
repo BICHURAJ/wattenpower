@@ -4,6 +4,7 @@ import { api, qs, shortDate } from '../api'
 import {
   PageHeader, Card, Table, Badge, SearchInput, Select, Pagination, Field, Banner, Loading, useFetch, BrandLogo,
 } from '../components/ui'
+import { useAuth } from '../auth'
 import LocationPicker from '../components/LocationPicker'
 
 // Screen 5: Website Lead Capture.
@@ -116,6 +117,9 @@ export function LeadsList() {
   const [page, setPage] = useState(1)
   const [error, setError] = useState('')
   const { data, loading, reload } = useFetch('/leads' + qs({ q: search, status, page }))
+  const { can } = useAuth()
+  // Converting updates the lead and creates a client.
+  const canConvert = can('leads', 'update') && can('clients', 'create')
 
   const convert = async (lead) => {
     try {
@@ -136,7 +140,9 @@ export function LeadsList() {
       header: 'Actions',
       render: (r) => r.convertedClient
         ? <span className="text-xs text-slate-400">Converted</span>
-        : <button className="text-brand-600 text-sm hover:underline" onClick={() => convert(r)}>Convert to client</button>,
+        : canConvert
+          ? <button className="text-brand-600 text-sm hover:underline" onClick={() => convert(r)}>Convert to client</button>
+          : <span className="text-xs text-slate-400">Not converted</span>,
     },
   ]
 

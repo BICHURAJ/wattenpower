@@ -9,8 +9,9 @@ import LocationPicker, { LocationMap, approximateLocation, directionsUrl, hasPoi
  *
  *   onEdit(startPoint)   open the editor, starting from this point (or null)
  *   onKeepApprox(point)  save the approximate point as the real pin
+ *   readOnly             hide the editing actions (for roles that can't edit the record)
  */
-export function LocationPanel({ address, postcode, location, onEdit, onKeepApprox, title = 'Location' }) {
+export function LocationPanel({ address, postcode, location, onEdit, onKeepApprox, title = 'Location', readOnly = false }) {
   const saved = hasPoint(location) ? location : null
   const [approx, setApprox] = useState(null)
   const [state, setState] = useState(saved ? 'saved' : 'idle') // saved | idle | looking | found | none | failed
@@ -44,7 +45,7 @@ export function LocationPanel({ address, postcode, location, onEdit, onKeepAppro
         <p className="text-xs font-medium uppercase tracking-wider text-slate-400">{title}</p>
         <div className="flex items-center gap-3 text-xs">
           {point && <a href={directionsUrl(point)} target="_blank" rel="noreferrer" className="text-brand-600 hover:underline">Directions</a>}
-          <button className="text-brand-600 hover:underline" onClick={() => onEdit(saved ? null : point)}>{saved ? 'Change' : point ? 'Adjust pin' : 'Set on map'}</button>
+          {!readOnly && <button className="text-brand-600 hover:underline" onClick={() => onEdit(saved ? null : point)}>{saved ? 'Change' : point ? 'Adjust pin' : 'Set on map'}</button>}
         </div>
       </div>
 
@@ -53,15 +54,20 @@ export function LocationPanel({ address, postcode, location, onEdit, onKeepAppro
       {!saved && state === 'found' && (
         <div className="mt-2 flex items-center justify-between gap-2 text-xs">
           <span className="text-amber-600">Approximate · from {approx.source === 'postcode' ? 'postcode ' + approx.label : 'address'}</span>
-          <button className="text-brand-600 font-medium hover:underline disabled:opacity-50" onClick={keepApprox} disabled={saving}>
-            {saving ? 'Saving...' : 'Save this location'}
-          </button>
+          {!readOnly && (
+            <button className="text-brand-600 font-medium hover:underline disabled:opacity-50" onClick={keepApprox} disabled={saving}>
+              {saving ? 'Saving...' : 'Save this location'}
+            </button>
+          )}
         </div>
       )}
 
       {state === 'looking' && <div className="h-[180px] rounded-xl bg-slate-50 grid place-items-center text-sm text-slate-400">Finding {postcode || 'address'} on the map...</div>}
 
-      {(state === 'none' || state === 'failed') && (
+      {(state === 'none' || state === 'failed') && readOnly && (
+        <p className="py-6 rounded-xl border border-dashed border-slate-200 text-center text-sm text-slate-400">No location on the map yet.</p>
+      )}
+      {(state === 'none' || state === 'failed') && !readOnly && (
         <button className="w-full py-6 rounded-xl border border-dashed border-slate-200 text-sm text-slate-400 hover:border-brand-300 hover:text-brand-600" onClick={() => onEdit(null)}>
           {state === 'failed'
             ? 'Could not find ' + (postcode || 'this address') + ' on the map. Pick it manually.'

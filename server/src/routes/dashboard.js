@@ -5,6 +5,7 @@ import Installation from '../models/Installation.js'
 import Ticket from '../models/Ticket.js'
 import Activity from '../models/Activity.js'
 import ComplianceItem from '../models/ComplianceItem.js'
+import { userCan } from '../permissions.js'
 
 const router = express.Router()
 
@@ -25,7 +26,8 @@ router.get('/', async (req, res, next) => {
         Quotation.countDocuments({ status: { $in: ['Draft', 'Sent'] } }),
         Installation.countDocuments({ ...activeOnly, installDate: { $gte: startOfMonth, $lt: endOfMonth } }),
         Ticket.countDocuments({ status: { $in: ['Open', 'In Progress'] } }),
-        Activity.find({}).sort('-createdAt').limit(6).lean(),
+        // Admins see the whole business; everyone else sees what they did.
+        Activity.find(userCan(req.user, 'allActivity') ? {} : { user: req.user._id }).sort('-createdAt').limit(50).lean(), // the panel shows 10 and scrolls
         Installation.find({ ...activeOnly, status: { $in: ['Scheduled', 'In Progress'] } })
           .sort('installDate')
           .limit(6)
@@ -67,11 +69,13 @@ router.get('/reports', async (req, res, next) => {
       ]),
     ])
 
+    // Quote money is for admin and finance only; everyone else gets the counts.
+    const showValues = userCan(req.user, 'quoteValues')
     res.json({
-      quotesByStatus,
+      quotesByStatus: showValues ? quotesByStatus : quotesByStatus.map(({ _id, count }) => ({ _id, count })),
       installsByStatus,
       ticketsByPriority,
-      acceptedValue: revenue[0]?.total || 0,
+      ...(showValues && { acceptedValue: revenue[0]?.total || 0 }),
     })
   } catch (err) { next(err) }
 })

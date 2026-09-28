@@ -7,8 +7,8 @@ import { Banner, BrandLogo } from '../components/ui'
 export default function Login() {
   const { user, login, loading } = useAuth()
   const navigate = useNavigate()
-  const [email, setEmail] = useState('david@wattenpower.co.uk')
-  const [password, setPassword] = useState('password123')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -55,9 +55,9 @@ export default function Login() {
           <Banner onDismiss={() => setError('')}>{error}</Banner>
 
           <form onSubmit={submit} className="space-y-4">
-            <input className="input" type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+            <input className="input" type="email" placeholder="Email" autoComplete="username" autoFocus value={email} onChange={(e) => setEmail(e.target.value)} required />
             <div>
-              <input className="input" type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+              <input className="input" type="password" placeholder="Password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
               <div className="text-right mt-1.5">
                 <span className="text-xs text-brand-600">Forgot password?</span>
               </div>
@@ -68,10 +68,10 @@ export default function Login() {
             </label>
           </form>
 
-          <p className="mt-6 text-xs text-slate-400 text-center">
-            Demo sign-in: david@wattenpower.co.uk / password123
+          <p className="mt-6 text-sm text-slate-500 text-center">
+            New here? <Link to="/signup" className="text-brand-600 font-medium hover:underline">Create an account</Link>
           </p>
-          <p className="mt-2 text-xs text-center">
+          <p className="mt-3 text-xs text-center">
             <Link to="/lead-capture" className="text-brand-600 hover:underline">Open the public website enquiry form</Link>
           </p>
           <p className="mt-8 text-[11px] text-slate-400 text-center">&copy; 2026 Watten Power Ltd. All rights reserved.</p>

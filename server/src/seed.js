@@ -1,4 +1,5 @@
 import 'dotenv/config'
+import crypto from 'node:crypto'
 import bcrypt from 'bcryptjs'
 import mongoose from 'mongoose'
 
@@ -29,6 +30,10 @@ const day = (offset) => {
 }
 
 async function seed() {
+  // This wipes every collection, so it never runs against production.
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('refusing to run with NODE_ENV=production -- the seed deletes all data')
+  }
   await connectDB()
 
   console.log('[seed] clearing existing data...')
@@ -41,11 +46,15 @@ async function seed() {
   ])
 
   // --- Users ---------------------------------------------------------------
-  const passwordHash = await bcrypt.hash('password123', 10)
+  // No fixed demo password: SEED_PASSWORD if set, otherwise a random one printed at the end.
+  const password = process.env.SEED_PASSWORD || crypto.randomBytes(12).toString('base64url')
+  if (password.length < 10) throw new Error('SEED_PASSWORD must be at least 10 characters')
+  const passwordHash = await bcrypt.hash(password, 12)
   await User.create([
     { name: 'David Parker', email: 'david@wattenpower.co.uk', passwordHash, role: 'admin', initials: 'DP' },
     { name: 'Sarah Green', email: 'sarah@wattenpower.co.uk', passwordHash, role: 'sales', initials: 'SG' },
     { name: 'Mike Brown', email: 'mike@wattenpower.co.uk', passwordHash, role: 'engineer', initials: 'MB' },
+    { name: 'Fiona Clarke', email: 'fiona@wattenpower.co.uk', passwordHash, role: 'finance', initials: 'FC' },
   ])
 
   // --- Engineers -----------------------------------------------------------
@@ -311,7 +320,8 @@ async function seed() {
   ])
 
   console.log('[seed] done.')
-  console.log('[seed] sign in with  david@wattenpower.co.uk  /  password123')
+  console.log('[seed] demo accounts: david@ (admin), sarah@ (sales), mike@ (engineer), fiona@ (finance) -- all @wattenpower.co.uk')
+  console.log('[seed] password for all of them' + (process.env.SEED_PASSWORD ? ' (from SEED_PASSWORD)' : ' (shown once, not stored anywhere)') + ':  ' + password)
   await mongoose.disconnect()
 }
 
