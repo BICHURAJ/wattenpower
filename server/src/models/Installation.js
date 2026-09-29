@@ -1,7 +1,7 @@
 import mongoose from 'mongoose'
 import { LocationSchema } from './Client.js'
 import { SystemDesignSchema } from './SystemDesign.js'
-import { PRODUCT_KEYS, HAND_STEP_KEYS, stepDone } from '../processes.js'
+import { PRODUCT_KEYS, HAND_STEP_KEYS, stepDone, progressOrderProblem } from '../processes.js'
 
 const TaskSchema = new mongoose.Schema({
   title: String,
@@ -77,6 +77,24 @@ InstallationSchema.pre('validate', function (next) {
   if (this.isNew || this.isModified('status')) {
     if (this.status === 'Completed' && !this.completedAt) this.completedAt = new Date()
     if (this.status !== 'Completed' && this.completedAt) this.completedAt = undefined
+  }
+  next()
+})
+
+// Remember the progress as loaded, so a save can tell which steps changed.
+function rememberProgress() {
+  this.$locals.loadedProgress = Object.fromEntries(this.progress || [])
+}
+InstallationSchema.post('init', rememberProgress)
+InstallationSchema.post('save', rememberProgress)
+
+// Steps are done in order, and Completed needs them all (progressOrderProblem).
+InstallationSchema.pre('validate', function (next) {
+  const completing = this.status === 'Completed' && (this.isNew || this.isModified('status'))
+  if (this.isNew || this.isModified('progress') || completing) {
+    const before = this.isNew ? {} : this.$locals.loadedProgress || {}
+    const problem = progressOrderProblem(this.products, before, this.progress, { completing })
+    if (problem) this.invalidate(problem.key === 'status' ? 'status' : 'progress.' + problem.key, problem.message)
   }
   next()
 })

@@ -33,7 +33,9 @@ export function useMessageAlerts(pathname) {
 
     const onEvent = (e) => {
       const event = e.detail
-      if (event.type === 'read-self') { refreshUnread(); return }
+      if (event.type === 'read-self' || event.type === 'hidden' || event.type === 'cleared') { refreshUnread(); return }
+      // A deleted message no longer counts as unread.
+      if (event.type === 'message-updated') { if (event.message.deleted) refreshUnread(); return }
       if (event.type !== 'message' || event.message.mine) return
       // Reading that chat right now: it marks itself read, nothing to announce.
       if (pathRef.current === '/messages/' + event.conversationId) return

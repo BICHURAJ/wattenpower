@@ -429,8 +429,8 @@ function ClientNotes({ client, onSaved }) {
 
 const Row = ({ label, children }) => (
   <div className="flex justify-between gap-3">
-    <dt className="text-slate-500">{label}</dt>
-    <dd className="text-slate-800 text-right">{children}</dd>
+    <dt className="text-slate-500 shrink-0">{label}</dt>
+    <dd className="min-w-0 text-slate-800 text-right break-words">{children}</dd>
   </div>
 )
 

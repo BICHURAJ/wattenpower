@@ -3,7 +3,7 @@ import Engineer from './models/Engineer.js'
 import Quotation from './models/Quotation.js'
 import Installation from './models/Installation.js'
 
-// Installation and client search. Every word typed must match something about the job:
+// Installation, client and quotation search. Every word typed must match something about the job:
 // its own fields, the client (name, contact, email, phone, address, postcode,
 // other sites), the engineer, the linked quote number, or the products
 // ("ev", "solar", "battery" and their everyday names). So "solar leeds" finds
@@ -118,6 +118,32 @@ export async function clientSearch(q) {
     ])
     const or = anyField([...CLIENT_FIELDS, 'notes.body'], word)
     if (jobs.length || quotes.length) or.push({ _id: { $in: [...jobs, ...quotes] } })
+    return { $or: or }
+  }))
+  return { $and: clauses }
+}
+
+/**
+ * Mongo filter for the quotations matching `q` (every word must match), or null.
+ * Words can match the quote itself (number, site, reference, status, notes,
+ * finance option, line items), a product ("solar"), the client's details, or
+ * the job number of an installation linked to it.
+ */
+export async function quotationSearch(q) {
+  const words = searchWords(q)
+  if (!words.length) return null
+
+  const clauses = await Promise.all(words.map(async (word) => {
+    const product = productFor(word)
+    if (product) return { products: product }
+
+    const [clients, jobs] = await Promise.all([
+      Client.find({ $or: anyField(CLIENT_FIELDS, word) }).distinct('_id'),
+      Installation.find({ installNo: wordRegex(word, 'installNo'), quotation: { $ne: null } }).distinct('quotation'),
+    ])
+    const or = anyField(['quoteNo', 'site', 'reference', 'status', 'notes', 'financeOption', 'items.description'], word)
+    if (clients.length) or.push({ client: { $in: clients } })
+    if (jobs.length) or.push({ _id: { $in: jobs } })
     return { $or: or }
   }))
   return { $and: clauses }

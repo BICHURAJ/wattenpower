@@ -4,7 +4,7 @@ import { api, shortDate } from '../api'
 import { PageHeader, Card, Table, Badge, Banner, Loading, Tabs, useFetch } from '../components/ui'
 import { useAuth } from '../auth'
 import {
-  normaliseProducts, ProductChips, DesignFields, DesignSummary, designForm, designPayload, kWpOf, mcsEstimate,
+  normaliseProducts, ProductChips, DesignFields, DesignSummary, designForm, designPayload, kWpOf, mcsEstimate, stepsFor,
 } from '../processes'
 
 // System Design: the engineers' workspace for designing solar PV and battery
@@ -88,6 +88,13 @@ export function SystemDesignEditor() {
   const products = normaliseProducts(job.products)
   const values = form || designForm(job.design)
   const designed = Boolean(job.progress?.systemDesigned)
+  // Steps go in order: the design waits for the steps before it (the survey),
+  // and can't be reopened once a later step is done.
+  const steps = stepsFor(products)
+  const at = steps.findIndex((s) => s.key === 'systemDesigned')
+  const isDone = (s) => (s.fromQuote ? job.quotation?.status === 'Accepted' : Boolean(job.progress?.[s.key]))
+  const waitingFor = at > 0 ? steps.slice(0, at).find((s) => !isDone(s)) : null
+  const laterDone = at >= 0 && steps.slice(at + 1).some((s) => !s.fromQuote && isDone(s))
   const estimate = mcsEstimate(values)
   const address = [job.address || job.client?.address, job.postcode || job.client?.postcode].filter(Boolean).join(', ')
 
@@ -166,9 +173,11 @@ export function SystemDesignEditor() {
             </div>
             {canDesign && canProgress && (
               designed
-                ? <button className="btn-secondary w-full mt-4" disabled={busy || job.status === 'On Hold'} onClick={() => setDesigned(false)}>Reopen design</button>
-                : <button className="btn-primary w-full mt-4" disabled={busy || job.status === 'On Hold'} onClick={() => setDesigned(true)}>Mark design complete</button>
+                ? <button className="btn-secondary w-full mt-4" disabled={busy || job.status === 'On Hold' || laterDone} onClick={() => setDesigned(false)}>Reopen design</button>
+                : <button className="btn-primary w-full mt-4" disabled={busy || job.status === 'On Hold' || Boolean(waitingFor)} onClick={() => setDesigned(true)}>Mark design complete</button>
             )}
+            {!designed && waitingFor && <p className="mt-2 text-xs text-slate-500">Complete "{waitingFor.label}" on the job first.</p>}
+            {designed && laterDone && <p className="mt-2 text-xs text-slate-500">Later steps are already done, so the design can't be reopened.</p>}
             {job.status === 'On Hold' && <p className="mt-2 text-xs text-slate-500">This job is on hold, so its steps can't change until it's resumed.</p>}
             {products.includes('solar') && !designed && estimate == null && (
               <p className="mt-2 text-xs text-slate-500">Fill in the panels and the MCS zone, Kk and shading factor to get the estimate.</p>

@@ -428,7 +428,7 @@ export default function Dashboard() {
                   <tr>
                     <th className="th pl-5">Job</th>
                     <th className="th">Status</th>
-                    <th className="th">Engineer</th>
+                    <th className="th hidden sm:table-cell">Engineer</th>
                     <th className="th text-right pr-5">Date</th>
                   </tr>
                 </thead>
@@ -445,7 +445,7 @@ export default function Dashboard() {
                         </Link>
                       </td>
                       <td className="td"><Badge>{item.status}</Badge></td>
-                      <td className="td text-slate-500">{item.engineer?.name || 'Unassigned'}</td>
+                      <td className="td text-slate-500 hidden sm:table-cell">{item.engineer?.name || 'Unassigned'}</td>
                       <td className="td text-right pr-5 text-slate-500">{shortDate(item.installDate)}</td>
                     </tr>
                   ))}

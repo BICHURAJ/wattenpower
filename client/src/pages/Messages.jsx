@@ -21,6 +21,29 @@ const dayOf = (date) => {
   return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: d.getFullYear() === today.getFullYear() ? undefined : 'numeric' })
 }
 
+/** The list with `message` swapped in for its old version. */
+const replaceMessage = (messages, message) => messages.map((m) => (m.id === message.id ? { ...m, ...message } : m))
+
+const TrashIcon = () => (
+  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M3 6h18" /><path d="M8 6V4h8v2" /><path d="M19 6l-1 14H6L5 6" /></svg>
+)
+
+/** Hover buttons beside a message: Edit (your own, not deleted) and Delete. */
+function MessageActions({ m, busy, onEdit, onDelete }) {
+  return (
+    <span className="flex gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+      {onEdit && !m.deleted && (
+        <button type="button" className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="Edit" disabled={busy} onClick={onEdit}>
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
+        </button>
+      )}
+      <button type="button" className="rounded-md p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" title="Delete" disabled={busy} onClick={onDelete}>
+        <TrashIcon />
+      </button>
+    </span>
+  )
+}
+
 function Avatar({ person, size = 'w-9 h-9' }) {
   return (
     <span className={'grid place-items-center shrink-0 rounded-full text-xs font-semibold ' + size + ' ' +
@@ -72,6 +95,11 @@ function Thread({ conversationId }) {
   const [error, setError] = useState('')
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
+  const [editing, setEditing] = useState(null) // { id, body }
+  const [busyId, setBusyId] = useState(null)
+  const [deleting, setDeleting] = useState(null) // the message being deleted (asks how)
+  const [clearing, setClearing] = useState(false) // asking to delete the whole chat
+  const navigate = useNavigate()
   const scrollRef = useRef(null)
   const stickToBottom = useRef(true)
   const latest = useRef(null)
@@ -112,6 +140,12 @@ function Thread({ conversationId }) {
         latest.current = event.message.createdAt
         // It's on screen, so it's read: tell the server (and so the sender's "Seen").
         if (!event.message.mine) api.post('/messages/conversations/' + conversationId + '/read').catch(() => {})
+      } else if (event.type === 'message-updated') {
+        setData((prev) => (prev ? { ...prev, messages: replaceMessage(prev.messages, event.message) } : prev))
+      } else if (event.type === 'hidden') {
+        setData((prev) => (prev ? { ...prev, messages: prev.messages.filter((m) => m.id !== event.messageId) } : prev))
+      } else if (event.type === 'cleared') {
+        navigate('/messages')
       }
     }
 
@@ -123,7 +157,7 @@ function Thread({ conversationId }) {
       window.removeEventListener('wp:message-event', onEvent)
       window.removeEventListener('wp:stream-open', load)
     }
-  }, [conversationId])
+  }, [conversationId, navigate])
 
   // Keep the view at the newest message, unless the user has scrolled up to read.
   useLayoutEffect(() => {
@@ -149,6 +183,50 @@ function Thread({ conversationId }) {
     } catch (err) { setError(err.message) } finally { setSending(false) }
   }
 
+  const messageUrl = (id) => '/messages/conversations/' + conversationId + '/messages/' + id
+  const applyChange = (message) => setData((prev) => (prev ? { ...prev, messages: replaceMessage(prev.messages, message) } : prev))
+
+  const saveEdit = async () => {
+    const body = editing.body.trim()
+    if (!body) return
+    setBusyId(editing.id)
+    setError('')
+    try {
+      applyChange(await api.put(messageUrl(editing.id), { body }))
+      setEditing(null)
+    } catch (err) { setError(err.message) } finally { setBusyId(null) }
+  }
+
+  // forEveryone: the sender deletes it for both people. Otherwise it goes from your view only.
+  const remove = async (m, forEveryone) => {
+    setDeleting(null)
+    setBusyId(m.id)
+    setError('')
+    try {
+      if (forEveryone) {
+        applyChange(await api.del(messageUrl(m.id)))
+      } else {
+        await api.post(messageUrl(m.id) + '/hide')
+        setData((prev) => (prev ? { ...prev, messages: prev.messages.filter((x) => x.id !== m.id) } : prev))
+      }
+      if (editing?.id === m.id) setEditing(null)
+    } catch (err) { setError(err.message) } finally { setBusyId(null) }
+  }
+
+  const clearChat = async () => {
+    setClearing(false)
+    setError('')
+    try {
+      await api.post('/messages/conversations/' + conversationId + '/clear')
+      navigate('/messages')
+    } catch (err) { setError(err.message) }
+  }
+
+  const onEditKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveEdit() }
+    if (e.key === 'Escape') setEditing(null)
+  }
+
   const onKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
   }
@@ -156,6 +234,7 @@ function Thread({ conversationId }) {
   if (error && !data) return <div className="p-6"><Banner>{error}</Banner></div>
   if (!data) return <div className="flex-1 grid place-items-center text-sm text-slate-400">Loading...</div>
 
+  const firstName = data.with?.name?.split(' ')[0] || 'They'
   const lastMine = [...data.messages].reverse().find((m) => m.mine)
   const seen = lastMine && data.theirReadAt && new Date(data.theirReadAt) >= new Date(lastMine.createdAt)
 
@@ -168,6 +247,12 @@ function Thread({ conversationId }) {
           <p className="text-sm font-semibold text-slate-900 truncate">{data.with?.name || 'Former user'}</p>
           <p className="text-xs text-slate-400">{data.with?.active === false ? 'No longer active' : ROLE_NAMES[data.with?.role] || ''}</p>
         </div>
+        {data.messages.length > 0 && (
+          <button type="button" className="ml-auto inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-slate-500 hover:bg-red-50 hover:text-red-600"
+            title="Delete this chat for you" onClick={() => setClearing(true)}>
+            <TrashIcon /> Delete chat
+          </button>
+        )}
       </div>
 
       <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto px-4 py-4 space-y-1.5 bg-[#f8fafd]">
@@ -180,12 +265,46 @@ function Thread({ conversationId }) {
           return (
             <div key={m.id}>
               {newDay && <p className="text-center text-[11px] font-medium text-slate-400 py-2">{dayOf(m.createdAt)}</p>}
-              <div className={'flex ' + (m.mine ? 'justify-end' : 'justify-start')}>
-                <div className={'max-w-[75%] rounded-2xl px-3.5 py-2 text-sm shadow-sm ' +
-                  (m.mine ? 'bg-brand-500 text-white rounded-br-md' : 'bg-white text-slate-800 ring-1 ring-slate-100 rounded-bl-md')}>
-                  <p className="whitespace-pre-wrap break-words">{m.body}</p>
-                  <p className={'mt-0.5 text-[10px] text-right ' + (m.mine ? 'text-white/70' : 'text-slate-400')}>{timeOf(m.createdAt)}</p>
-                </div>
+              <div className={'group flex items-center gap-1.5 ' + (m.mine ? 'justify-end' : 'justify-start')}>
+                {/* Your own messages can be edited or deleted. */}
+                {m.mine && editing?.id !== m.id && (
+                  <MessageActions m={m} busy={busyId === m.id} onEdit={() => setEditing({ id: m.id, body: m.body })} onDelete={() => setDeleting(m)} />
+                )}
+                {editing?.id === m.id ? (
+                  <div className="w-full max-w-[75%] rounded-2xl bg-white p-2 ring-2 ring-brand-300 shadow-sm">
+                    <textarea
+                      className="input min-h-[42px] max-h-40 resize-none text-sm"
+                      rows={Math.min(6, Math.max(1, editing.body.split('\n').length))}
+                      value={editing.body}
+                      maxLength={MAX_LENGTH}
+                      onChange={(e) => setEditing({ ...editing, body: e.target.value })}
+                      onKeyDown={onEditKeyDown}
+                      autoFocus
+                    />
+                    <div className="mt-1.5 flex items-center justify-end gap-2">
+                      <span className="mr-auto text-[11px] text-slate-400">Enter to save, Esc to cancel</span>
+                      <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={() => setEditing(null)}>Cancel</button>
+                      <button type="button" className="btn-primary px-2.5 py-1 text-xs" disabled={!editing.body.trim() || busyId === m.id} onClick={saveEdit}>
+                        {busyId === m.id ? 'Saving...' : 'Save'}
+                      </button>
+                    </div>
+                  </div>
+                ) : m.deleted ? (
+                  <div className="max-w-[75%] rounded-2xl px-3.5 py-2 text-sm italic text-slate-400 ring-1 ring-slate-200 bg-transparent">
+                    This message was deleted
+                    <span className="ml-2 not-italic text-[10px]">{timeOf(m.createdAt)}</span>
+                  </div>
+                ) : (
+                  <div className={'max-w-[75%] rounded-2xl px-3.5 py-2 text-sm shadow-sm ' +
+                    (m.mine ? 'bg-brand-500 text-white rounded-br-md' : 'bg-white text-slate-800 ring-1 ring-slate-100 rounded-bl-md')}>
+                    <p className="whitespace-pre-wrap break-words">{m.body}</p>
+                    <p className={'mt-0.5 text-[10px] text-right ' + (m.mine ? 'text-white/70' : 'text-slate-400')}>
+                      {m.editedAt && <span title={'Edited ' + new Date(m.editedAt).toLocaleString('en-GB')}>edited · </span>}
+                      {timeOf(m.createdAt)}
+                    </p>
+                  </div>
+                )}
+                {!m.mine && <MessageActions m={m} busy={busyId === m.id} onDelete={() => setDeleting(m)} />}
               </div>
             </div>
           )
@@ -202,7 +321,8 @@ function Thread({ conversationId }) {
             <textarea
               className="input min-h-[42px] max-h-40 resize-none"
               rows={Math.min(6, Math.max(1, draft.split('\n').length))}
-              placeholder="Write a message... (Enter to send, Shift+Enter for a new line)"
+              placeholder="Write a message..."
+              title="Enter to send, Shift+Enter for a new line"
               value={draft}
               maxLength={MAX_LENGTH}
               onChange={(e) => setDraft(e.target.value)}
@@ -215,6 +335,36 @@ function Thread({ conversationId }) {
           </div>
         )}
       </div>
+
+      {deleting && (
+        <Modal open title="Delete message?" onClose={() => setDeleting(null)}>
+          <p className="text-sm text-slate-600">
+            {deleting.mine && !deleting.deleted
+              ? 'Delete it for everyone, or only remove it from your view.'
+              : 'It will be removed from your view. ' + firstName + ' will still see it.'}
+          </p>
+          <div className="mt-5 flex flex-wrap justify-end gap-2">
+            <button type="button" className="btn-secondary" onClick={() => setDeleting(null)}>Cancel</button>
+            <button type="button" className="btn-secondary text-red-600" onClick={() => remove(deleting, false)}>Delete for me</button>
+            {deleting.mine && !deleting.deleted && (
+              <button type="button" className="btn-primary bg-red-600 hover:bg-red-700" onClick={() => remove(deleting, true)}>Delete for everyone</button>
+            )}
+          </div>
+        </Modal>
+      )}
+
+      {clearing && (
+        <Modal open title="Delete chat?" onClose={() => setClearing(false)}>
+          <p className="text-sm text-slate-600">
+            All messages in this chat will be removed from your view. {firstName} will still have their copy,
+            and the chat comes back if either of you sends a new message.
+          </p>
+          <div className="mt-5 flex justify-end gap-2">
+            <button type="button" className="btn-secondary" onClick={() => setClearing(false)}>Cancel</button>
+            <button type="button" className="btn-primary bg-red-600 hover:bg-red-700" onClick={clearChat}>Delete chat</button>
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }

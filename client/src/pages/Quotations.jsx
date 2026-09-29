@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, qs, money, shortDate, inputDate, lineAmounts, quoteTotals } from '../api'
 import {
@@ -54,10 +54,16 @@ function usePdfExport() {
 // Screen 6: Quotation List
 export function QuotationsList() {
   const [search, setSearch] = useState('')
+  // Searched a moment after typing stops, not on every key.
+  const [query, setQuery] = useState('')
+  useEffect(() => {
+    const timer = setTimeout(() => setQuery(search.trim()), 300)
+    return () => clearTimeout(timer)
+  }, [search])
   const [status, setStatus] = useState('All')
   const [page, setPage] = useState(1)
   const navigate = useNavigate()
-  const { data, loading, error } = useFetch('/quotations' + qs({ q: search, status, page }))
+  const { data, loading, error } = useFetch('/quotations' + qs({ q: query, status, page }))
   const { busyId, pdfError, setPdfError, download } = usePdfExport()
   const { can } = useAuth()
 
@@ -103,7 +109,7 @@ export function QuotationsList() {
 
       <Card bodyClass="">
         <div className="flex flex-wrap gap-2 p-4 border-b border-slate-200">
-          <SearchInput value={search} onChange={(v) => { setSearch(v); setPage(1) }} placeholder="Search quotations..." />
+          <SearchInput value={search} onChange={(v) => { setSearch(v); setPage(1) }} placeholder="Search quote no., customer, address, postcode, EV, solar, battery, item..." />
           <Select value={status} onChange={(v) => { setStatus(v); setPage(1) }} options={STATUSES} />
         </div>
         {loading ? <Loading /> : (
@@ -286,9 +292,10 @@ function QuotationForm({ quote }) {
         </Card>
 
         <Card title="Items">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
+          {/* Phones: each line is its own block, with the fields on two rows. */}
+          <div className="sm:overflow-x-auto">
+            <table className="block sm:table w-full text-sm">
+              <thead className="hidden sm:table-header-group">
                 <tr className="text-left text-xs text-slate-500 uppercase">
                   <th className="py-2 pr-2">Item / Description</th>
                   <th className="py-2 px-2 w-20">Qty</th>
@@ -298,15 +305,30 @@ function QuotationForm({ quote }) {
                   <th className="w-8" />
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="block sm:table-row-group divide-y divide-slate-100 sm:divide-y-0">
                 {items.map((item, index) => (
-                  <tr key={index}>
-                    <td className="py-1.5 pr-2"><input className="input" value={item.description} onChange={(e) => updateItem(index, 'description', e.target.value)} /></td>
-                    <td className="py-1.5 px-2"><input className="input" type="number" min="0" value={item.qty} onChange={(e) => updateItem(index, 'qty', e.target.value)} /></td>
-                    <td className="py-1.5 px-2"><input className="input" type="number" min="0" step="0.01" value={item.unitPrice} onChange={(e) => updateItem(index, 'unitPrice', e.target.value)} /></td>
-                    <td className="py-1.5 px-2"><input className="input" type="number" min="0" value={item.vat} onChange={(e) => updateItem(index, 'vat', e.target.value)} /></td>
-                    <td className="py-1.5 pl-2 text-right text-slate-700">{money(lineAmounts(item).total)}</td>
-                    <td className="text-center">
+                  <tr key={index} className="relative grid grid-cols-3 gap-2 py-3 sm:table-row sm:py-0">
+                    <td className="col-span-3 pr-8 sm:pr-2 sm:py-1.5 sm:table-cell">
+                      <span className="sm:hidden label">Item / Description</span>
+                      <input className="input" value={item.description} onChange={(e) => updateItem(index, 'description', e.target.value)} />
+                    </td>
+                    <td className="sm:py-1.5 sm:px-2 sm:table-cell">
+                      <span className="sm:hidden label">Qty</span>
+                      <input className="input" type="number" min="0" value={item.qty} onChange={(e) => updateItem(index, 'qty', e.target.value)} />
+                    </td>
+                    <td className="sm:py-1.5 sm:px-2 sm:table-cell">
+                      <span className="sm:hidden label">Unit price</span>
+                      <input className="input" type="number" min="0" step="0.01" value={item.unitPrice} onChange={(e) => updateItem(index, 'unitPrice', e.target.value)} />
+                    </td>
+                    <td className="sm:py-1.5 sm:px-2 sm:table-cell">
+                      <span className="sm:hidden label">VAT %</span>
+                      <input className="input" type="number" min="0" value={item.vat} onChange={(e) => updateItem(index, 'vat', e.target.value)} />
+                    </td>
+                    <td className="col-span-3 flex justify-between sm:table-cell sm:py-1.5 sm:pl-2 text-right text-slate-700 whitespace-nowrap">
+                      <span className="sm:hidden text-xs text-slate-500">Line total (inc. VAT)</span>
+                      {money(lineAmounts(item).total)}
+                    </td>
+                    <td className="absolute right-0 top-9 sm:static sm:table-cell text-center">
                       {items.length > 1 && (
                         <button className="text-slate-400 hover:text-red-500" onClick={() => { itemsEdited.current = true; setItems(items.filter((_, i) => i !== index)) }}>&times;</button>
                       )}
@@ -431,6 +453,7 @@ export function QuotationDetails() {
 
           {tab === 'Items' && (
             <>
+              <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-xs text-slate-500 uppercase border-b border-slate-200">
@@ -444,15 +467,16 @@ export function QuotationDetails() {
                     <tr key={item._id}>
                       <td className="py-2 text-slate-700">{item.description}</td>
                       <td className="py-2 px-2">{item.qty}</td>
-                      <td className="py-2 px-2">{money(item.unitPrice)}</td>
-                      <td className="py-2 px-2">{item.vat}%</td>
-                      <td className="py-2 text-right">{money(lineAmounts(item).total)}</td>
+                      <td className="py-2 px-2 whitespace-nowrap">{money(item.unitPrice)}</td>
+                      <td className="py-2 px-2 whitespace-nowrap">{item.vat}%</td>
+                      <td className="py-2 text-right whitespace-nowrap">{money(lineAmounts(item).total)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+              </div>
               <div className="mt-4 pt-3 border-t border-slate-200 flex justify-end">
-                <dl className="w-64 space-y-1.5 text-sm">
+                <dl className="w-full sm:w-64 space-y-1.5 text-sm">
                   <div className="flex justify-between"><dt className="text-slate-500">Subtotal</dt><dd>{money(totals.subtotal)}</dd></div>
                   <div className="flex justify-between"><dt className="text-slate-500">VAT</dt><dd>{money(totals.vatTotal)}</dd></div>
                   <div className="flex justify-between pt-1.5 border-t border-slate-200 font-semibold text-slate-900">
@@ -499,7 +523,7 @@ export function QuotationDetails() {
 
 const Row = ({ label, children }) => (
   <div className="flex justify-between gap-3">
-    <dt className="text-slate-500">{label}</dt>
-    <dd className="text-slate-800 text-right">{children}</dd>
+    <dt className="text-slate-500 shrink-0">{label}</dt>
+    <dd className="min-w-0 text-slate-800 text-right break-words">{children}</dd>
   </div>
 )

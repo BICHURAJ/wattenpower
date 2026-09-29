@@ -8,7 +8,7 @@ import Activity from '../models/Activity.js'
 import { crudRouter } from '../middleware/crud.js'
 import { syncInstallation } from '../quoteProgress.js'
 import { userCan } from '../permissions.js'
-import { stepDone } from '../processes.js'
+import { stepDone, progressOrderProblem } from '../processes.js'
 import { installationSearch } from '../installationSearch.js'
 
 const router = express.Router()
@@ -113,6 +113,14 @@ router.post('/:id/certification', requireProgressRight, async (req, res, next) =
     const install = await Installation.findById(req.params.id)
     if (!install) return res.status(404).json({ error: 'Installation not found' })
 
+    // Steps go in order: a complete certificate ticks "Testing & commissioning",
+    // so everything before it must be done first.
+    if (req.body?.complete) {
+      const ticked = { ...Object.fromEntries(install.progress || []), testingCertification: true }
+      const problem = progressOrderProblem(install.products, install.progress, ticked)
+      if (problem) return res.status(409).json({ error: problem.message })
+    }
+
     const existing = await Certification.findOne({ installation: install._id })
     const cert = existing || new Certification({
       installation: install._id,
@@ -121,15 +129,21 @@ router.post('/:id/certification', requireProgressRight, async (req, res, next) =
     cert.set(req.body)
     await cert.save()
 
-    if (cert.complete) {
-      // Every product's process has these two steps (see processes.js).
+    if (cert.complete && !stepDone(install.progress, 'testingCertification')) {
+      // Every product's process has this step (see processes.js).
       install.progress.set('testingCertification', true)
-      install.progress.set('handover', true)
-      install.status = 'Completed'
+      // Hand over and complete the job too, if nothing else is left in between
+      // (solar jobs still have the MCS certificate and scaffolding to do).
+      const handedOver = { ...Object.fromEntries(install.progress), handover: true }
+      const closesJob = !progressOrderProblem(install.products, install.progress, handedOver, { completing: true })
+      if (closesJob) {
+        install.progress.set('handover', true)
+        install.status = 'Completed'
+      }
       await install.save()
       await Activity.create({
         type: 'installation',
-        text: 'Installation ' + install.installNo + ' completed and certified',
+        text: 'Installation ' + install.installNo + (closesJob ? ' completed and certified' : ' certified (EIC)'),
         refId: install._id,
       })
     }

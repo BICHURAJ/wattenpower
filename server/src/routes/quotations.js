@@ -4,6 +4,7 @@ import Installation from '../models/Installation.js'
 import Activity from '../models/Activity.js'
 import { crudRouter } from '../middleware/crud.js'
 import { syncAfterQuotationChange } from '../quoteProgress.js'
+import { quotationSearch } from '../installationSearch.js'
 
 const router = express.Router()
 
@@ -96,7 +97,8 @@ router.get('/:id', async (req, res, next) => {
 })
 
 router.use('/', crudRouter(Quotation, {
-  searchFields: ['quoteNo', 'site', 'reference'],
+  // Every word must match the quote, its items, products, client or linked jobs (installationSearch.js).
+  search: quotationSearch,
   populate: POPULATE,
   afterCreate: async (doc) => {
     await doc.populate('client', 'name')

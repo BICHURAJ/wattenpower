@@ -608,6 +608,13 @@ export function InstallationDetails() {
   const products = normaliseProducts(install.products)
   const panel = [...stepsFor(products), { key: COMPLETED, label: 'Completed' }]
   const quoteStep = panel.findIndex((step) => step.fromQuote)
+  // Whether the step at `index` is done: Completed is the job's status, the quote step follows the quote.
+  const doneAt = (index) => {
+    const step = panel[index]
+    if (step.key === COMPLETED) return install.status === 'Completed'
+    if (step.fromQuote) return quoteAccepted
+    return Boolean(install.progress?.[step.key])
+  }
 
   const toggleStage = async (key) => {
     try {
@@ -815,16 +822,25 @@ export function InstallationDetails() {
               const { key, label } = step
               // Driven by the quotation status, so never ticked by hand.
               const fromQuote = Boolean(step.fromQuote)
-              const done = key === COMPLETED ? install.status === 'Completed' : fromQuote ? quoteAccepted : Boolean(install.progress?.[key])
-              // Steps after the quote wait for it to be accepted; ones already ticked can still be unticked.
-              const locked = index > quoteStep && !quoteAccepted && !done
+              const done = doneAt(index)
+              // Steps go in order: each one waits for every step above it...
+              const waitingFor = done ? null : panel.slice(0, index).find((_, i) => !doneAt(i))
+              const locked = Boolean(waitingFor)
+              // ...and a done step can only be unticked while nothing after it is done.
+              const laterDone = done && panel.slice(index + 1).some((s, i) => !s.fromQuote && doneAt(index + 1 + i))
               // Some steps (the survey) can't be unticked once done.
               const final = done && Boolean(step.final)
-              const disabled = locked || fromQuote || final || onHold || !canProgress
+              const disabled = locked || laterDone || fromQuote || final || onHold || !canProgress
               let hint = done ? 'Completed' : 'Pending'
-              if (locked) hint = 'Waiting for quote acceptance'
+              if (locked) hint = index > quoteStep && waitingFor.fromQuote ? 'Waiting for quote acceptance' : 'Waiting for "' + waitingFor.label + '"'
               if (onHold && !done && !fromQuote) hint = 'On hold'
               if (fromQuote) hint = quote ? quote.quoteNo + ' · ' + quote.status : 'No quotation linked'
+              const title = fromQuote ? 'Set from the quotation status'
+                : onHold ? 'Resume the job to change its progress'
+                : final ? 'Completed -- cannot be undone'
+                : locked ? (waitingFor.fromQuote ? 'Accept the quotation first' : 'Complete "' + waitingFor.label + '" first')
+                : laterDone ? 'Untick the later steps first'
+                : done ? 'Mark as not done' : 'Mark as done'
               return (
                 <li key={key} className="flex items-start gap-3">
                   <button
@@ -832,7 +848,7 @@ export function InstallationDetails() {
                     disabled={disabled}
                     className={'mt-0.5 grid place-items-center w-5 h-5 rounded-full text-[11px] shrink-0 transition-colors disabled:cursor-not-allowed ' +
                       (done ? 'bg-emerald-500 text-white' : locked ? 'bg-slate-100 text-slate-300' : 'bg-slate-200 text-slate-400 hover:bg-slate-300 disabled:hover:bg-slate-200')}
-                    title={fromQuote ? 'Set from the quotation status' : onHold ? 'Resume the job to change its progress' : final ? 'Completed -- cannot be undone' : locked ? 'Accept the quotation first' : done ? 'Mark as not done' : 'Mark as done'}
+                    title={title}
                   >
                     {done ? '✓' : locked ? '🔒' : ''}
                   </button>
@@ -985,6 +1001,6 @@ export function InstallationCertification() {
 const Row = ({ label, children }) => (
   <div>
     <dt className="text-xs text-slate-500">{label}</dt>
-    <dd className="text-slate-800">{children}</dd>
+    <dd className="text-slate-800 break-words">{children}</dd>
   </div>
 )

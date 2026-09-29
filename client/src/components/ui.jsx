@@ -19,11 +19,11 @@ export function BrandLogo({ className = '' }) {
 export function PageHeader({ title, subtitle, children }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight text-slate-900">{title}</h1>
-        {subtitle && <p className="text-sm text-slate-400 mt-0.5">{subtitle}</p>}
+      <div className="min-w-0">
+        <h1 className="text-xl font-semibold tracking-tight text-slate-900 break-words">{title}</h1>
+        {subtitle && <p className="text-sm text-slate-400 mt-0.5 break-words">{subtitle}</p>}
       </div>
-      <div className="flex items-center gap-2">{children}</div>
+      {children && <div className="flex flex-wrap items-center gap-2">{children}</div>}
     </div>
   )
 }
@@ -110,7 +110,7 @@ export function Badge({ children, tone }) {
 
 export function SearchInput({ value, onChange, placeholder = 'Search...' }) {
   return (
-    <div className="relative flex-1 min-w-[200px]">
+    <div className="relative flex-1 min-w-[min(200px,100%)]">
       <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
         <circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" />
       </svg>
@@ -135,8 +135,37 @@ export function Table({ columns, rows, empty = 'Nothing to show yet.', onRowClic
   if (!rows.length) {
     return <div className="px-4 py-12 text-center text-sm text-slate-400">{empty}</div>
   }
+  const cell = (col, row) => (col.render ? col.render(row) : row[col.key])
+  const [first, ...rest] = columns
+  const actions = rest.filter((col) => col.key === 'actions')
+  const fields = rest.filter((col) => col.key !== 'actions')
   return (
-    <div className="overflow-x-auto">
+    <>
+      {/* Phones: each row is a card -- first column as the title, the rest as label / value. */}
+      <ul className="sm:hidden divide-y divide-slate-100">
+        {rows.map((row, index) => (
+          <li
+            key={row._id || index}
+            className={'px-4 py-3 ' + (onRowClick ? 'cursor-pointer active:bg-brand-50/60' : '')}
+            onClick={onRowClick ? () => onRowClick(row) : undefined}
+          >
+            <div className="text-sm font-medium text-slate-900 break-words">{cell(first, row)}</div>
+            {fields.length > 0 && (
+              <dl className="mt-1.5 grid grid-cols-[auto,1fr] gap-x-3 gap-y-1 text-sm">
+                {fields.map((col) => (
+                  <div key={col.key} className="contents">
+                    <dt className="text-xs text-slate-400 pt-0.5">{col.header}</dt>
+                    <dd className="min-w-0 text-slate-700 break-words">{cell(col, row) ?? '--'}</dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+            {actions.map((col) => <div key={col.key} className="mt-2 flex flex-wrap gap-3">{cell(col, row)}</div>)}
+          </li>
+        ))}
+      </ul>
+
+      <div className="hidden sm:block overflow-x-auto">
       <table className="w-full">
         <thead className="border-b border-slate-100">
           <tr>{columns.map((col) => <th key={col.key} className="th">{col.header}</th>)}</tr>
@@ -148,19 +177,20 @@ export function Table({ columns, rows, empty = 'Nothing to show yet.', onRowClic
               className={'hover:bg-brand-50/40 transition-colors ' + (onRowClick ? 'cursor-pointer' : '')}
               onClick={onRowClick ? () => onRowClick(row) : undefined}
             >
-              {columns.map((col) => <td key={col.key} className="td">{col.render ? col.render(row) : row[col.key]}</td>)}
+              {columns.map((col) => <td key={col.key} className="td">{cell(col, row)}</td>)}
             </tr>
           ))}
         </tbody>
       </table>
-    </div>
+      </div>
+    </>
   )
 }
 
 export function Pagination({ page, pages, total, onChange }) {
   if (!total) return null
   return (
-    <div className="flex items-center justify-between px-4 py-3 border-t border-slate-100 text-sm text-slate-400">
+    <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-t border-slate-100 text-sm text-slate-400">
       <span>Showing page {page} of {pages} &middot; {total} record{total === 1 ? '' : 's'}</span>
       <div className="flex gap-1">
         <button className="btn-secondary px-3 py-1" disabled={page <= 1} onClick={() => onChange(page - 1)}>Prev</button>
@@ -172,7 +202,7 @@ export function Pagination({ page, pages, total, onChange }) {
 
 export function Tabs({ tabs, active, onChange }) {
   return (
-    <div className="inline-flex max-w-full gap-1 p-1 mb-4 rounded-xl bg-white border border-slate-100 shadow-soft overflow-x-auto">
+    <div className="inline-flex max-w-full gap-1 p-1 mb-4 rounded-xl bg-white border border-slate-100 shadow-soft overflow-x-auto no-scrollbar">
       {tabs.map((tab) => (
         <button
           key={tab}
@@ -197,13 +227,13 @@ export function Modal({ open, title, onClose, children, width = 'max-w-lg' }) {
 
   if (!open) return null
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto bg-brand-900/30 backdrop-blur-sm">
-      <div className={'card w-full mt-12 ' + width} onClick={(e) => e.stopPropagation()}>
-        <header className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-          <h2 className="font-semibold text-slate-900">{title}</h2>
+    <div className="fixed inset-0 z-50 flex items-start justify-center p-3 sm:p-4 overflow-y-auto bg-brand-900/30 backdrop-blur-sm">
+      <div className={'card w-full min-w-0 mt-4 sm:mt-12 ' + width} onClick={(e) => e.stopPropagation()}>
+        <header className="flex items-center justify-between gap-3 px-4 sm:px-5 py-4 border-b border-slate-100">
+          <h2 className="font-semibold text-slate-900 min-w-0 break-words">{title}</h2>
           <button className="btn-ghost px-2 py-1" onClick={onClose}>&times;</button>
         </header>
-        <div className="p-5">{children}</div>
+        <div className="p-4 sm:p-5">{children}</div>
       </div>
     </div>
   )

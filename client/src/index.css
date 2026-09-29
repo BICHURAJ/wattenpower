@@ -10,6 +10,15 @@
   ::-webkit-scrollbar { width: 8px; height: 8px; }
   ::-webkit-scrollbar-thumb { @apply bg-slate-200 rounded-full; }
   ::-webkit-scrollbar-track { background: transparent; }
+  /* Grid and flex children may shrink below their longest word, so one long
+     email or address wraps instead of pushing the page wider than a phone. */
+  .grid > *, .flex > * { min-width: 0; }
+  /* Unbroken strings (emails, references) wrap rather than overflow. */
+  dd { overflow-wrap: break-word; }
+  /* Stop iOS zooming in on focused inputs (it does below 16px). */
+  @media (max-width: 639px) {
+    input, select, textarea { font-size: 16px !important; }
+  }
 }
 
 @layer components {
@@ -25,6 +34,9 @@
   .td { @apply px-4 py-3 text-sm text-slate-700 whitespace-nowrap; }
   .nav-section { @apply px-3 pt-5 pb-2 text-[11px] font-medium uppercase tracking-wider text-slate-400; }
   .nav-link { @apply flex items-center gap-3 px-3 py-2 rounded-xl text-sm text-slate-500 hover:bg-slate-50 hover:text-slate-800 transition-colors; }
+  /* Sideways-scrolling strips (tab bars) that swipe without showing a scrollbar. */
+  .no-scrollbar { scrollbar-width: none; }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
   .nav-link-active { @apply bg-brand-500 text-white font-medium shadow-sm shadow-brand-500/30 hover:bg-brand-500 hover:text-white; }
 }
 

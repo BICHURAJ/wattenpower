@@ -191,6 +191,9 @@ function AccessModal({ user, areas, levels, roleDefaults, onClose, onSave }) {
 }
 
 // Admin only: add users, approve sign-ups, set roles, make accounts active or inactive.
+/** Field name shown beside a value when the users table is stacked on a phone. */
+const MobileLabel = ({ children }) => <span className="md:hidden text-xs text-slate-400">{children}</span>
+
 export default function Users() {
   const { user: me } = useAuth()
   const { data, loading, error, reload } = useFetch('/users')
@@ -282,9 +285,10 @@ export default function Users() {
       <Tabs tabs={tabs} active={activeTab} onChange={(t) => setRoleTab(t.replace(/ \(\d+\)$/, ''))} />
 
       <Card bodyClass="">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
+        {/* Phones: each user is a card, with a small label on each field. */}
+        <div className="md:overflow-x-auto">
+          <table className="block md:table w-full text-sm">
+            <thead className="hidden md:table-header-group">
               <tr className="text-left text-xs uppercase text-slate-500 border-b border-slate-100">
                 <th className="px-5 py-3 font-medium">Name</th>
                 <th className="px-5 py-3 font-medium">Role</th>
@@ -294,21 +298,22 @@ export default function Users() {
                 <th className="px-5 py-3" />
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="block md:table-row-group divide-y divide-slate-100">
               {shown.length === 0 && (
-                <tr><td colSpan={6} className="px-5 py-10 text-center text-slate-400">No {roleTab === 'All' ? '' : roleTab.toLowerCase() + ' '}users yet.</td></tr>
+                <tr className="block md:table-row"><td colSpan={6} className="block md:table-cell px-5 py-10 text-center text-slate-400">No {roleTab === 'All' ? '' : roleTab.toLowerCase() + ' '}users yet.</td></tr>
               )}
               {shown.map((u) => {
                 const isMe = u.id === me?.id
                 return (
-                  <tr key={u.id} className={u.status === 'disabled' ? 'bg-slate-50/60' : ''}>
-                    <td className="px-5 py-3">
+                  <tr key={u.id} className={'block md:table-row px-4 py-3 md:p-0 ' + (u.status === 'disabled' ? 'bg-slate-50/60' : '')}>
+                    <td className="block md:table-cell md:px-5 md:py-3 pb-2">
                       <p className={'font-medium ' + (u.status === 'disabled' ? 'text-slate-500' : 'text-slate-900')}>
                         {u.name}{isMe && <span className="ml-1.5 text-xs font-normal text-slate-400">(you)</span>}
                       </p>
                       <p className="text-xs text-slate-500">{u.email}</p>
                     </td>
-                    <td className="px-5 py-3">
+                    <td className="flex md:table-cell items-center justify-between gap-3 py-1 md:px-5 md:py-3">
+                      <MobileLabel>Role</MobileLabel>
                       {isMe ? roleLabel(u.role) : (
                         <select
                           className="input w-36 py-1.5"
@@ -321,7 +326,8 @@ export default function Users() {
                         </select>
                       )}
                     </td>
-                    <td className="px-5 py-3">
+                    <td className="flex md:table-cell items-center justify-between gap-3 py-1 md:px-5 md:py-3">
+                      <MobileLabel>Status</MobileLabel>
                       {isMe ? <Badge tone={STATUS_TONE[u.status]}>{STATUS_LABEL[u.status]}</Badge> : (
                         <select
                           className="input w-32 py-1.5"
@@ -335,7 +341,8 @@ export default function Users() {
                         </select>
                       )}
                     </td>
-                    <td className="px-5 py-3 whitespace-nowrap">
+                    <td className="flex md:table-cell items-center justify-between gap-3 py-1 md:px-5 md:py-3 whitespace-nowrap">
+                      <MobileLabel>Access</MobileLabel>
                       {u.role === 'admin' ? <span className="text-slate-400">Full access</span>
                         : !u.role ? <span className="text-slate-400">--</span>
                         : (
@@ -348,8 +355,8 @@ export default function Users() {
                           </button>
                         )}
                     </td>
-                    <td className="px-5 py-3 text-slate-500 whitespace-nowrap">{u.createdAt ? shortDate(u.createdAt) : '--'}</td>
-                    <td className="px-5 py-3 text-right whitespace-nowrap">
+                    <td className="flex md:table-cell items-center justify-between gap-3 py-1 md:px-5 md:py-3 text-slate-500 whitespace-nowrap"><MobileLabel>Added</MobileLabel>{u.createdAt ? shortDate(u.createdAt) : '--'}</td>
+                    <td className="block md:table-cell pt-2 md:px-5 md:py-3 md:text-right whitespace-nowrap">
                       {!isMe && (
                         <button className="text-red-600 hover:underline disabled:opacity-50" disabled={busyId === u.id} onClick={() => remove(u)}>Delete</button>
                       )}

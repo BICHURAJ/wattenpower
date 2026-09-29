@@ -66,6 +66,39 @@ export function progressOf(install) {
   return { done: steps.filter((s) => stepDone(install?.progress, s.key)).length, total: steps.length + 1 }
 }
 
+/**
+ * Steps are done in order. Given a job's progress before and after a change,
+ * returns what's wrong ({ key, message }) or null:
+ *   - a step can only be ticked once every step before it is done;
+ *   - a step can only be unticked while no later step is done;
+ *   - the job can only be Completed once every step is done.
+ * Only the steps that changed are checked, so older jobs ticked out of order
+ * aren't blocked from other edits.
+ */
+export function progressOrderProblem(products, before, after, { completing = false } = {}) {
+  const steps = stepsFor(products)
+  for (let i = 0; i < steps.length; i++) {
+    const { key, label, fromQuote } = steps[i]
+    // Follows the quotation, so it's never held up (but later steps still wait for it).
+    if (fromQuote) continue
+    const was = stepDone(before, key)
+    const now = stepDone(after, key)
+    if (!was && now) {
+      const missing = steps.slice(0, i).find((s) => !stepDone(after, s.key))
+      if (missing) return { key, message: 'Complete "' + missing.label + '" before "' + label + '".' }
+    }
+    if (was && !now) {
+      const later = steps.slice(i + 1).find((s) => stepDone(after, s.key))
+      if (later) return { key, message: 'Untick "' + later.label + '" before "' + label + '".' }
+    }
+  }
+  if (completing) {
+    const missing = steps.find((s) => !stepDone(after, s.key))
+    if (missing) return { key: 'status', message: 'Complete "' + missing.label + '" before marking the job Completed.' }
+  }
+  return null
+}
+
 /** Choices for the solar / battery system design (models/SystemDesign.js). */
 export const DESIGN_OPTIONS = {
   orientations: ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'],
