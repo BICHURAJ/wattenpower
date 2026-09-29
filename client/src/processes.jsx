@@ -60,6 +60,108 @@ export function progressOf(install) {
 
 export const productLabel = (key) => cache?.products?.[key] || key
 
+// --- Site survey (checklist from server/src/surveyChecklist.js) -------------------------
+
+/** Photo stages, survey to handover: [{ key, label }]. */
+export const photoStages = () => cache?.survey?.photoStages || []
+
+/** The survey sections for a job with these products. */
+export function surveySectionsFor(products) {
+  const chosen = products?.length ? products : ['ev']
+  return (cache?.survey?.sections || []).filter((s) => s.products.some((p) => chosen.includes(p)))
+}
+
+const answered = (v) => v !== undefined && v !== null && String(v).trim() !== ''
+
+// --- Handover (checklist from server/src/handoverChecklist.js) --------------------------
+
+/** The handover sections for a job with these products (items filtered by product too). */
+export function handoverSectionsFor(products) {
+  const chosen = products?.length ? products : ['ev']
+  return (cache?.handover?.sections || [])
+    .filter((s) => s.products.some((p) => chosen.includes(p)))
+    .map((s) => ({ ...s, items: s.items.filter((i) => !i.products || i.products.some((p) => chosen.includes(p))) }))
+}
+
+/** Same as the server's handoverProgress: { done, total, percent, missing, issues }. */
+export function handoverProgressOf(products, answers = {}) {
+  const missing = []
+  const issues = []
+  let done = 0
+  let total = 0
+  for (const section of handoverSectionsFor(products)) {
+    for (const item of section.items) {
+      const value = answers[item.key]
+      if (item.expect && answered(value) && value !== item.expect) issues.push({ section: section.key, key: item.key, label: item.label })
+      if (!item.required) continue
+      total++
+      if (answered(value)) done++
+      else missing.push({ section: section.key, key: item.key, label: item.label })
+    }
+  }
+  return { done, total, percent: total ? Math.round((done / total) * 100) : 0, missing, issues }
+}
+
+/** Same as the server's surveyProgress: { done, total, percent, sections, missing, issues }. */
+export function surveyProgressOf(products, answers = {}, photoSlots = new Set()) {
+  const sections = []
+  const missing = []
+  const issues = []
+  for (const section of surveySectionsFor(products)) {
+    let done = 0
+    let total = 0
+    for (const item of section.items) {
+      const value = answers[item.key]
+      if (item.expect && answered(value) && value !== item.expect) issues.push({ section: section.key, key: item.key, label: item.label })
+      if (!item.required) continue
+      total++
+      if (answered(value)) done++
+      else missing.push({ section: section.key, key: item.key, label: item.label })
+    }
+    for (const photo of section.photos) {
+      total++
+      if (photoSlots.has(photo.key)) done++
+      else missing.push({ section: section.key, key: photo.key, label: 'Photo: ' + photo.label, photo: true })
+    }
+    sections.push({ key: section.key, done, total })
+  }
+  const done = sections.reduce((n, s) => n + s.done, 0)
+  const total = sections.reduce((n, s) => n + s.total, 0)
+  return { done, total, percent: total ? Math.round((done / total) * 100) : 0, sections, missing, issues }
+}
+
+/**
+ * A job's steps as a read-only list: done steps get a green tick, the rest a
+ * grey circle. `highlight` marks the step the current page is about.
+ */
+export function JobProgress({ install, highlight }) {
+  const quoteAccepted = install?.quotation?.status === 'Accepted'
+  const steps = [...stepsFor(install?.products), { key: 'completed', label: 'Completed' }]
+  const done = (step) => (step.key === 'completed' ? install?.status === 'Completed'
+    : step.fromQuote ? quoteAccepted : stepDone(install?.progress, step.key))
+  return (
+    <ol className="space-y-1">
+      {steps.map((step) => {
+        const isDone = done(step)
+        const current = step.key === highlight
+        return (
+          <li
+            key={step.key}
+            className={'flex items-center gap-3 rounded-lg px-2 py-1.5 transition-colors ' +
+              (current ? (isDone ? 'bg-emerald-50 ring-1 ring-emerald-200' : 'bg-brand-50/60 ring-1 ring-brand-200') : '')}
+          >
+            <span className={'grid place-items-center w-5 h-5 rounded-full text-[11px] shrink-0 ' + (isDone ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-400')}>
+              {isDone ? '✓' : ''}
+            </span>
+            <span className={'text-sm ' + (isDone ? 'text-slate-800' : 'text-slate-500') + (current ? ' font-medium' : '')}>{step.label}</span>
+            {current && <span className={'ml-auto text-[11px] font-medium ' + (isDone ? 'text-emerald-700' : 'text-brand-600')}>{isDone ? 'Done' : 'This step'}</span>}
+          </li>
+        )
+      })}
+    </ol>
+  )
+}
+
 // --- Shared UI ------------------------------------------------------------------------
 
 export const PRODUCT_STYLE = {
@@ -139,13 +241,14 @@ export function mcsEstimate(design) {
 /** Form values for a design (strings for inputs). */
 export const designForm = (design = {}) => {
   const keys = ['panelMake', 'panelModel', 'panelCount', 'panelWatts', 'inverterMake', 'inverterModel', 'inverterKw',
-    'batteryMake', 'batteryModel', 'batteryKwh', 'orientation', 'pitch', 'mounting', 'mcsZone', 'kk', 'shadingFactor', 'notes']
+    'batteryMake', 'batteryModel', 'batteryKwh', 'orientation', 'pitch', 'mounting', 'mcsZone', 'kk', 'shadingFactor', 'notes',
+    'consumptionKwh', 'occupancy', 'importTariff', 'exportTariff']
   return Object.fromEntries(keys.map((k) => [k, design?.[k] ?? '']))
 }
 
 /** Design to send to the API: numbers as numbers, blanks dropped. */
 export function designPayload(form) {
-  const numbers = ['panelCount', 'panelWatts', 'inverterKw', 'batteryKwh', 'pitch', 'kk', 'shadingFactor']
+  const numbers = ['panelCount', 'panelWatts', 'inverterKw', 'batteryKwh', 'pitch', 'kk', 'shadingFactor', 'consumptionKwh', 'importTariff', 'exportTariff']
   const out = {}
   for (const [k, v] of Object.entries(form || {})) {
     if (v === '' || v === null || v === undefined) continue

@@ -11,6 +11,7 @@ import Signup from './pages/Signup'
 import Users from './pages/Users'
 import Messages from './pages/Messages'
 import { SystemDesignList, SystemDesignEditor } from './pages/SystemDesign'
+import { SiteSurveyList, SiteSurveyEditor } from './pages/SiteSurvey'
 import Dashboard from './pages/Dashboard'
 import { ClientsList, ClientDetails } from './pages/Clients'
 import LeadCapture, { LeadsList } from './pages/LeadCapture'
@@ -46,6 +47,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             <Route path="grants" element={<GrantsList />} />
             <Route path="grants/:id" element={<GrantSubmission />} />
             <Route path="engineers" element={<Engineers />} />
+            <Route path="site-survey" element={<SiteSurveyList />} />
+            <Route path="site-survey/:id" element={<SiteSurveyEditor />} />
             <Route path="system-design" element={<SystemDesignList />} />
             <Route path="system-design/:id" element={<SystemDesignEditor />} />
             <Route path="compliance" element={<ComplianceHub />} />

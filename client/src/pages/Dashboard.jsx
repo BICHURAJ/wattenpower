@@ -5,6 +5,7 @@ import { availabilityOn, localDayKey } from '../availability'
 import { useAuth } from '../auth'
 import { Card, StatCard, Badge, Loading, Banner, useFetch } from '../components/ui'
 import { summarise, exportOverviewPdf } from '../reports/overview'
+import OverviewAnalytics from '../components/OverviewAnalytics'
 import InstallationMap, { useInstallationLocations, pinColour, phaseOf, progressOf, LEGEND_COLOURS } from '../components/InstallationMap'
 import { normaliseProducts, productLabel, PRODUCT_STYLE } from '../processes'
 
@@ -214,6 +215,11 @@ export default function Dashboard() {
   // Also optional: without it the availability card just shows an empty state.
   const { data: engineerData } = useFetch('/engineers' + qs({ limit: 200 }))
   const { data: installData } = useFetch('/installations' + qs({ limit: 200 }))
+  // Installations, surveys and engineers analytics -- only for the areas this user can see.
+  const { can: allowed } = useAuth()
+  const { data: installReport } = useFetch(allowed('installations') ? '/installations/report' : null)
+  const { data: surveyStats } = useFetch(allowed('siteSurveys') ? '/site-surveys/stats' : null)
+  const { data: engineerReport } = useFetch(allowed('engineers') ? '/engineers/report' : null)
   const [mapFilter, setMapFilter] = useState('Active')
   const [mapProduct, setMapProduct] = useState('All') // or 'ev' / 'solar' / 'battery'
   const { user, can } = useAuth()
@@ -269,7 +275,7 @@ export default function Dashboard() {
     setExporting(true)
     setExportError('')
     try {
-      await exportOverviewPdf({ data, reports, user, map: pdfMap() })
+      await exportOverviewPdf({ data, reports, user, map: pdfMap(), ops: { installs: installReport, surveys: surveyStats, engineers: engineerReport } })
     } catch (err) {
       setExportError('Could not create the PDF: ' + err.message)
     } finally {
@@ -305,6 +311,8 @@ export default function Dashboard() {
         />
         <StatCard label="Open tickets" value={stats.openTickets} icon={ICONS.tickets} pill={stats.openTickets ? 'Action' : 'Clear'} pillTone={stats.openTickets ? 'amber' : 'green'} hint="open or in progress" />
       </div>
+
+      <OverviewAnalytics installs={installReport} surveys={surveyStats} engineers={engineerReport} />
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Card title="Quote pipeline" subtitle={'By status · ' + (byValue ? 'total value' : 'number of quotes')} className="lg:col-span-2" action={<ViewAll to="/quotations" />}>

@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
+import { CREDITS, esriCredit } from './mapCredits'
 
 // Shared 3D map setup for every map in the app (MapLibre GL).
 // All sources are free and keyless: OpenFreeMap vector tiles (with 3D
@@ -31,9 +32,9 @@ export const BASE_STYLES = {
         tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
         tileSize: 256,
         maxzoom: 19,
-        attribution: 'Imagery &copy; Esri, Maxar, Earthstar Geographics',
+        attribution: CREDITS.esriSatellite,
       },
-      openmaptiles: { type: 'vector', url: 'https://tiles.openfreemap.org/planet' },
+      openmaptiles: { type: 'vector', url: 'https://tiles.openfreemap.org/planet', attribution: CREDITS.openFreeMap },
     },
     layers: [{ id: 'satellite', type: 'raster', source: 'satellite' }, BUILDINGS_3D],
   },
@@ -45,7 +46,7 @@ export const TERRAIN_SOURCE = {
   encoding: 'terrarium',
   tileSize: 256,
   maxzoom: 15,
-  attribution: 'Terrain &copy; Mapzen, AWS',
+  attribution: CREDITS.terrain,
 }
 const TERRAIN = { source: 'terrain', exaggeration: 1.3 }
 export const PITCH_3D = 55
@@ -80,7 +81,8 @@ export function createMap(container, prefsRef, options = {}) {
       style: BASE_STYLES[prefs.base],
       pitch: prefs.is3d ? PITCH_3D : 0,
       maxPitch: 75,
-      attributionControl: { compact: true },
+      // The providers' credits, always shown as one small line (styled in index.css).
+      attributionControl: { compact: false },
       ...options,
     })
   } catch {
@@ -92,15 +94,6 @@ export function createMap(container, prefsRef, options = {}) {
   map.on('style.load', () => {
     if (!map.getSource('terrain')) map.addSource('terrain', TERRAIN_SOURCE)
     map.setTerrain(prefsRef.current.is3d ? TERRAIN : null)
-  })
-  // The map credits start folded into the (i) button. MapLibre opens them on
-  // load and only folds them on drag, so small maps nobody drags kept the text on show.
-  map.once('idle', () => {
-    const attrib = map.getContainer().querySelector('.maplibregl-ctrl-attrib.maplibregl-compact')
-    if (attrib) {
-      attrib.classList.remove('maplibregl-compact-show')
-      attrib.setAttribute('open', '')
-    }
   })
   return map
 }
@@ -214,6 +207,7 @@ export function StaticMap({ lat, lng, zoom = 17, base = 'Satellite', pinColour =
         <path d="M15 0C6.7 0 0 6.6 0 14.8 0 25.9 15 40 15 40s15-14.1 15-25.2C30 6.6 23.3 0 15 0Z" fill={pinColour} />
         <circle cx="15" cy="14.5" r="5.5" fill="#fff" />
       </svg>
+      <span className="map-credit absolute bottom-0 right-0">{esriCredit(base)}</span>
     </div>
   )
 }

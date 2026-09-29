@@ -269,6 +269,8 @@ export function useFetch(path, deps = []) {
   const [nonce, setNonce] = useState(0)
 
   useEffect(() => {
+    // No path: nothing to fetch (e.g. an area this user can't see).
+    if (!path) { setData(null); setLoading(false); return undefined }
     let cancelled = false
     setLoading(true)
     api.get(path)

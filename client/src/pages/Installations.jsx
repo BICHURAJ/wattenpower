@@ -15,6 +15,8 @@ import {
   DesignFields, DesignSummary, designForm, designPayload, needsDesign, kWpOf,
 } from '../processes'
 import { StaticMap, useMapPrefs, streetViewUrl } from '../components/mapView'
+import { JobPhotos } from '../components/Photos'
+import HandoverPanel from '../components/Handover'
 
 const STATUSES = ['All', 'Scheduled', 'In Progress', 'Completed', 'On Hold', 'Cancelled']
 
@@ -167,8 +169,19 @@ export function InstallationsList() {
   const { prefs, setBase } = useMapPrefs(noMap)
   const rows = data?.items || []
   const { locations, loading: locating } = useInstallationLocations(rows)
-  const { can } = useAuth()
+  const { can, user } = useAuth()
   const canDelete = can('installations', 'delete')
+  // Analytics strip and the PDF report (GET /installations/report).
+  const analytics = useFetch('/installations/report')
+  const [exporting, setExporting] = useState(false)
+  const exportReport = async () => {
+    setExporting(true)
+    setActionError('')
+    try {
+      const { exportInstallationReportPdf } = await import('../reports/installationReport')
+      await exportInstallationReportPdf({ report: await api.get('/installations/report'), user })
+    } catch (err) { setActionError('Could not create the report: ' + err.message) } finally { setExporting(false) }
+  }
 
   const remove = async (row) => {
     setActionError('')
@@ -217,8 +230,13 @@ export function InstallationsList() {
   return (
     <>
       <PageHeader title="Installations" subtitle="EV charger, solar PV and battery jobs, from survey through to handover">
+        <button type="button" className="btn-secondary" disabled={exporting || !analytics.data} onClick={exportReport}>
+          <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 17v3h16v-3" /></svg>
+          {exporting ? 'Building report...' : 'Export report'}
+        </button>
         {can('installations', 'create') && <button className="btn-primary" onClick={() => setShowNew(true)}>+ New Installation</button>}
       </PageHeader>
+      <InstallationAnalytics data={analytics.data} onPick={(st) => { setStatus(st); setPage(1) }} />
 
       <Banner>{error}</Banner>
       <Banner onDismiss={() => setActionError('')}>{actionError}</Banner>
@@ -573,6 +591,12 @@ export function InstallationDetails() {
   const canEdit = can('installations', 'update')
   // Progress steps, tasks and hold/resume: engineers (and admins) only.
   const canProgress = can('installationProgress', 'update')
+  // The job's site survey (Operations > Site Survey): its status drives the survey step.
+  const [survey, setSurvey] = useState(null)
+  useEffect(() => {
+    if (!can('siteSurveys')) return
+    api.get('/site-surveys/by-installation/' + id).then(setSurvey).catch(() => {})
+  }, [id, install?.updatedAt]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) return <Loading />
   if (!install) return <Banner>Installation not found.</Banner>
@@ -700,7 +724,11 @@ export function InstallationDetails() {
               <span className="text-sm font-semibold text-slate-900">{install.installNo}</span>
               <Badge>{install.status}</Badge>
             </div>
-            <Tabs tabs={needsDesign(products) ? ['Overview', 'System', 'Tasks', 'Compliance', 'Notes'] : ['Overview', 'Tasks', 'Compliance', 'Notes']} active={tab} onChange={setTab} />
+            <Tabs
+              tabs={[...(needsDesign(products) ? ['Overview', 'System'] : ['Overview']), 'Tasks', 'Compliance', ...(can('photos') ? ['Photos'] : []), 'Handover', 'Notes']}
+              active={tab}
+              onChange={setTab}
+            />
 
             {tab === 'Overview' && (
               <dl className="grid sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
@@ -779,10 +807,21 @@ export function InstallationDetails() {
               </div>
             )}
 
+            {tab === 'Photos' && (
+              <div className="py-2">
+                <p className="mb-4 text-xs text-slate-500">Photos from the site survey through to handover. On a phone, "Add photos" opens the camera.</p>
+                <JobPhotos installationId={install._id} surveyLocked={survey?.status === 'Completed'} />
+              </div>
+            )}
+
+            {tab === 'Handover' && <HandoverPanel install={install} onChanged={reload} />}
+
             {tab === 'Notes' && <p className="text-sm text-slate-600 py-4">{install.notes || 'No notes on this job.'}</p>}
           </Card>
         </div>
 
+        <div className="space-y-4">
+        {survey && <SurveyCard survey={survey} />}
         <Card
           title="Progress"
           action={canHold && canProgress && (
@@ -830,12 +869,20 @@ export function InstallationDetails() {
               const laterDone = done && panel.slice(index + 1).some((s, i) => !s.fromQuote && doneAt(index + 1 + i))
               // Some steps (the survey) can't be unticked once done.
               const final = done && Boolean(step.final)
-              const disabled = locked || laterDone || fromQuote || final || onHold || !canProgress
+              // The survey step is ticked by completing the site survey, when the job has one open.
+              const bySurvey = key === 'siteSurveyCompleted' && !done && survey && survey.status !== 'Completed'
+              // Handover is ticked by completing the handover record.
+              const byHandover = key === 'handover' && !done
+              const disabled = locked || laterDone || fromQuote || final || onHold || !canProgress || bySurvey || byHandover
               let hint = done ? 'Completed' : 'Pending'
               if (locked) hint = index > quoteStep && waitingFor.fromQuote ? 'Waiting for quote acceptance' : 'Waiting for "' + waitingFor.label + '"'
               if (onHold && !done && !fromQuote) hint = 'On hold'
               if (fromQuote) hint = quote ? quote.quoteNo + ' · ' + quote.status : 'No quotation linked'
-              const title = fromQuote ? 'Set from the quotation status'
+              if (bySurvey) hint = 'Site survey ' + survey.status.toLowerCase() + ' · ' + (survey.progress?.percent || 0) + '% covered'
+              if (byHandover && !locked) hint = 'Recorded in the Handover tab'
+              const title = bySurvey ? 'Completed from the site survey'
+                : byHandover ? 'Completed from the Handover tab'
+                : fromQuote ? 'Set from the quotation status'
                 : onHold ? 'Resume the job to change its progress'
                 : final ? 'Completed -- cannot be undone'
                 : locked ? (waitingFor.fromQuote ? 'Accept the quotation first' : 'Complete "' + waitingFor.label + '" first')
@@ -854,15 +901,47 @@ export function InstallationDetails() {
                   </button>
                   <div>
                     <p className={'text-sm ' + (done ? 'text-slate-800' : locked ? 'text-slate-400' : 'text-slate-500')}>{label}</p>
-                    <p className="text-xs text-slate-400">{hint}</p>
+                    <p className="text-xs text-slate-400">
+                      {hint}
+                      {bySurvey && <> · <Link to={'/site-survey/' + survey.id} className="text-brand-600 hover:underline">Open survey</Link></>}
+                      {byHandover && <> · <button type="button" className="text-brand-600 hover:underline" onClick={() => setTab('Handover')}>Open handover</button></>}
+                    </p>
                   </div>
                 </li>
               )
             })}
           </ol>
         </Card>
+        </div>
       </div>
     </>
+  )
+}
+
+const SURVEY_TONE = { 'Not started': 'slate', Booked: 'blue', 'In progress': 'amber', Completed: 'green' }
+
+/** The job's site survey at a glance, with a link to open it. */
+function SurveyCard({ survey }) {
+  const percent = survey.legacy ? 100 : survey.progress?.percent || 0
+  const done = survey.status === 'Completed'
+  return (
+    <Card
+      title="Site survey"
+      action={<Link to={'/site-survey/' + survey.id} className="btn-secondary text-xs px-2.5 py-1">{done ? 'View' : survey.status === 'Not started' ? 'Start survey' : 'Open survey'}</Link>}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <Badge tone={SURVEY_TONE[survey.status]}>{survey.status}</Badge>
+        <span className="text-sm font-semibold text-slate-800">{percent + '%'}</span>
+      </div>
+      <div className="mt-2 h-2 w-full rounded-full bg-slate-100 overflow-hidden">
+        <div className={'h-full rounded-full ' + (done ? 'bg-emerald-500' : 'bg-brand-500')} style={{ width: percent + '%' }} />
+      </div>
+      <p className="mt-2 text-xs text-slate-500">
+        {survey.scheduledAt && !done ? 'Visit booked ' + new Date(survey.scheduledAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }) + '. ' : ''}
+        {survey.progress?.issues ? survey.progress.issues + ' item(s) need action. ' : ''}
+        {done ? 'Survey complete.' : (survey.progress?.total || 0) - (survey.progress?.done || 0) + ' required items and photos to go.'}
+      </p>
+    </Card>
   )
 }
 
@@ -981,7 +1060,7 @@ export function InstallationCertification() {
             ))}
           </div>
           <p className="text-xs text-slate-400 mt-3">
-            Marking this complete sets the installation to Completed and ticks off testing and handover.
+            Marking this complete ticks off testing &amp; commissioning. The job completes when it's handed over (Handover tab).
           </p>
         </Card>
       </div>
@@ -1004,3 +1083,27 @@ const Row = ({ label, children }) => (
     <dd className="text-slate-800 break-words">{children}</dd>
   </div>
 )
+
+/** Analytics strip above the installations list; each tile filters the list. */
+function InstallationAnalytics({ data, onPick }) {
+  if (!data) return null
+  const s = data.stats
+  const tile = (label, value, hint, { tone = 'text-slate-900', status } = {}) => (
+    <button type="button" key={label} onClick={status ? () => onPick(status) : undefined}
+      className={'card p-4 text-left ' + (status ? 'hover:shadow-md transition-shadow' : 'cursor-default')}>
+      <p className="text-xs font-medium text-slate-500">{label}</p>
+      <p className={'mt-1 text-2xl font-semibold ' + tone}>{value}</p>
+      <p className="mt-1 text-xs text-slate-400 truncate">{hint}</p>
+    </button>
+  )
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3 mb-4">
+      {tile('Active jobs', s.active, s.total + ' in total', { status: 'All' })}
+      {tile('In progress', s.statusCounts['In Progress'] || 0, (s.statusCounts.Scheduled || 0) + ' scheduled', { tone: 'text-amber-600', status: 'In Progress' })}
+      {tile('Overdue', s.overdue, 'Install date passed', { tone: s.overdue ? 'text-red-600' : 'text-slate-900' })}
+      {tile('On hold', s.onHold, 'Paused jobs', { tone: s.onHold ? 'text-amber-600' : 'text-slate-900', status: 'On Hold' })}
+      {tile('To hand over', s.awaitingHandover, 'Tested, not handed over', { tone: s.awaitingHandover ? 'text-brand-700' : 'text-slate-900' })}
+      {tile('Completed', s.completionRate + '%', s.completedThisMonth + ' this month', { tone: 'text-emerald-600', status: 'Completed' })}
+    </div>
+  )
+}

@@ -10,6 +10,10 @@ import { syncInstallation } from '../quoteProgress.js'
 import { userCan } from '../permissions.js'
 import { stepDone, progressOrderProblem } from '../processes.js'
 import { installationSearch } from '../installationSearch.js'
+import SiteSurvey from '../models/SiteSurvey.js'
+import SitePhoto from '../models/SitePhoto.js'
+import { ensureSurvey, refreshSurvey } from '../surveyService.js'
+import extraRoutes from './installationExtras.js'
 
 const router = express.Router()
 
@@ -52,8 +56,13 @@ const guardDesign = (req, res, next) =>
     ? next()
     : res.status(403).json({ error: 'Only engineers can change the system design.' }))
 
-router.post('/', guardProgressFields, guardDesign)
-router.put('/:id', guardProgressFields, guardDesign)
+// The handover is recorded through its own routes (installationExtras.js), never a plain update.
+const dropHandover = (req, res, next) => { if (req.body) delete req.body.handover; next() }
+router.post('/', dropHandover, guardProgressFields, guardDesign)
+router.put('/:id', dropHandover, guardProgressFields, guardDesign)
+
+// Handover record and the analytics report.
+router.use('/', extraRoutes)
 
 router.post('/:id/hold', requireProgressRight, async (req, res, next) => {
   try {
@@ -130,20 +139,13 @@ router.post('/:id/certification', requireProgressRight, async (req, res, next) =
     await cert.save()
 
     if (cert.complete && !stepDone(install.progress, 'testingCertification')) {
-      // Every product's process has this step (see processes.js).
+      // Every product's process has this step (see processes.js). Handover is
+      // recorded separately (Handover tab), which then completes the job.
       install.progress.set('testingCertification', true)
-      // Hand over and complete the job too, if nothing else is left in between
-      // (solar jobs still have the MCS certificate and scaffolding to do).
-      const handedOver = { ...Object.fromEntries(install.progress), handover: true }
-      const closesJob = !progressOrderProblem(install.products, install.progress, handedOver, { completing: true })
-      if (closesJob) {
-        install.progress.set('handover', true)
-        install.status = 'Completed'
-      }
       await install.save()
       await Activity.create({
         type: 'installation',
-        text: 'Installation ' + install.installNo + (closesJob ? ' completed and certified' : ' certified (EIC)'),
+        text: 'Installation ' + install.installNo + ' certified (EIC)',
         refId: install._id,
       })
     }
@@ -175,6 +177,8 @@ router.delete('/:id', async (req, res, next) => {
     }
 
     await Certification.deleteMany({ installation: install._id })
+    await SiteSurvey.deleteMany({ installation: install._id })
+    await SitePhoto.deleteMany({ installation: install._id })
     await install.deleteOne()
     await Activity.create({ type: 'installation', text: 'Installation ' + install.installNo + ' deleted', by: req.user?.name })
     res.json({ ok: true })
@@ -240,6 +244,8 @@ router.use('/', crudRouter(Installation, {
   // Jobs of Inactive clients are hidden, unless a client is asked for by ?client=.
   baseFilter: () => Client.activeOnly(),
   afterCreate: async (doc) => {
+    // Every job gets its site survey (Operations > Site Survey).
+    await ensureSurvey(doc)
     // A new job starts with "Quotation Accepted" from its linked quote.
     await syncInstallation(doc)
     await Activity.create({
@@ -249,7 +255,12 @@ router.use('/', crudRouter(Installation, {
     })
   },
   // The linked quotation may have changed, and the step is never set by hand.
-  afterUpdate: syncInstallation,
+  afterUpdate: async (doc) => {
+    await syncInstallation(doc)
+    // Products may have changed, and with them the survey checklist.
+    const survey = await SiteSurvey.findOne({ installation: doc._id })
+    if (survey && survey.status !== 'Completed') await refreshSurvey(survey, doc)
+  },
 }))
 
 export default router

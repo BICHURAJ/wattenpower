@@ -51,12 +51,41 @@ const InstallationSchema = new mongoose.Schema({
   },
   tasks: [TaskSchema],
   notes: String,
+  // Handover record: commissioning results, certificates and what the customer
+  // was given (handoverChecklist.js). Completing it ticks the Handover step.
+  handover: {
+    answers: { type: Map, of: mongoose.Schema.Types.Mixed },
+    completedAt: Date,
+    completedBy: String,
+  },
 }, { timestamps: true })
 
 // A completed site survey is final: once ticked it cannot be unticked.
 InstallationSchema.pre('validate', function (next) {
   if (!this.isNew && this.isModified('progress.siteSurveyCompleted') && !stepDone(this.progress, 'siteSurveyCompleted')) {
     this.invalidate('progress.siteSurveyCompleted', 'The site survey is already completed and cannot be undone.')
+  }
+  next()
+})
+
+// The survey step is ticked by completing the job's site survey (Operations >
+// Site Survey), not by hand -- unless the job has no survey on record.
+InstallationSchema.pre('validate', async function (next) {
+  if (!this.isNew && !this.$locals.fromSurvey && this.isModified('progress.siteSurveyCompleted') &&
+      stepDone(this.progress, 'siteSurveyCompleted') && !stepDone(this.$locals.loadedProgress, 'siteSurveyCompleted')) {
+    const survey = await mongoose.model('SiteSurvey').findOne({ installation: this._id }).select('status').lean()
+    if (survey && survey.status !== 'Completed') {
+      this.invalidate('progress.siteSurveyCompleted', 'Complete the site survey (Operations > Site Survey) to tick this step.')
+    }
+  }
+  next()
+})
+
+// The Handover step is ticked by completing the job's handover record (Handover tab).
+InstallationSchema.pre('validate', function (next) {
+  if (!this.isNew && !this.$locals.fromHandover && this.isModified('progress.handover') &&
+      stepDone(this.progress, 'handover') && !stepDone(this.$locals.loadedProgress, 'handover')) {
+    this.invalidate('progress.handover', 'Complete the handover (Handover tab) to tick this step.')
   }
   next()
 })

@@ -7,6 +7,7 @@ import { clearUnlinkedQuoteSteps } from './quoteProgress.js'
 import User from './models/User.js'
 import Activity from './models/Activity.js'
 import { migrateProducts } from './productMigration.js'
+import { backfillSurveys } from './surveyService.js'
 
 // Check the security settings before anything else, so a bad deploy stops here.
 let config
@@ -25,6 +26,9 @@ connectDB()
   .then(() => Activity.backfillUsers())
   .then(() => migrateProducts())
   .then(() => clearUnlinkedQuoteSteps())
+  // Every installation has a site survey (older jobs get one here).
+  .then(() => backfillSurveys())
+  .then((created) => { if (created) console.log('[survey] created ' + created + ' site survey record(s) for existing jobs') })
   .then(() => {
     app.listen(PORT, () => console.log('[api] listening on http://localhost:' + PORT + ' (CORS: ' + config.corsOrigins.join(', ') + ')'))
   })

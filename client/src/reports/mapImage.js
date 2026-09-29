@@ -1,3 +1,5 @@
+import { CREDITS, drawCanvasCredit } from '../components/mapCredits'
+
 // Draws a static map (street-map tiles plus coloured pins) onto a canvas, for
 // PDFs. jsPDF cannot embed the live WebGL map, so this rebuilds it from the
 // same Esri raster tiles the installation cards use.
@@ -109,9 +111,75 @@ export async function renderMapImage({ points, width = 780, height = 400 }) {
     }
   }
 
+  drawCanvasCredit(ctx, width, height, CREDITS.esriStreet)
+
   try {
     return canvas.toDataURL('image/jpeg', 0.9)
   } catch {
     return null // the tile server didn't allow the image to be read back
+  }
+}
+
+const SATELLITE_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile'
+
+/**
+ * A close-up satellite picture of one property with a pin on it, for the
+ * customer proposal. Resolves to a JPEG data URL, or null if it can't be made.
+ */
+export async function renderSiteImage({ lat, lng, width = 800, height = 520, zoom = 19 }) {
+  if (lat == null || lng == null) return null
+  const p = project(lat, lng)
+  const scale = TILE * 2 ** zoom
+  const left = p.x * scale - width / 2
+  const top = p.y * scale - height / 2
+
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const ctx = canvas.getContext('2d')
+  ctx.fillStyle = '#cbd5e1'
+  ctx.fillRect(0, 0, width, height)
+
+  let drawn = 0
+  const jobs = []
+  for (let ty = Math.floor(top / TILE); ty <= Math.floor((top + height) / TILE); ty++) {
+    for (let tx = Math.floor(left / TILE); tx <= Math.floor((left + width) / TILE); tx++) {
+      jobs.push(loadTile(SATELLITE_URL + '/' + zoom + '/' + ty + '/' + tx).then((img) => {
+        if (img) { ctx.drawImage(img, Math.round(tx * TILE - left), Math.round(ty * TILE - top), TILE, TILE); drawn++ }
+      }))
+    }
+  }
+  await Promise.all(jobs)
+  if (!drawn) return null
+
+  // A ring around the house and a pin on it.
+  const cx = width / 2
+  const cy = height / 2
+  ctx.strokeStyle = 'rgba(128, 221, 55, 0.95)'
+  ctx.lineWidth = 4
+  ctx.beginPath()
+  ctx.arc(cx, cy, Math.min(width, height) * 0.2, 0, Math.PI * 2)
+  ctx.stroke()
+  const pin = new Path2D(PIN_PATH)
+  ctx.save()
+  ctx.translate(cx - 15, cy - 40)
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.45)'
+  ctx.shadowBlur = 6
+  ctx.shadowOffsetY = 2
+  ctx.fillStyle = '#006afd'
+  ctx.fill(pin)
+  ctx.shadowColor = 'transparent'
+  ctx.fillStyle = '#ffffff'
+  ctx.beginPath()
+  ctx.arc(15, 14.5, 5.5, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.restore()
+
+  drawCanvasCredit(ctx, width, height, CREDITS.esriSatellite)
+
+  try {
+    return canvas.toDataURL('image/jpeg', 0.88)
+  } catch {
+    return null
   }
 }

@@ -53,7 +53,7 @@ const hexToRgb = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)
 /**
  * `map` (optional): { points: [{ lat, lng, colour, count }], filter, unplaced, legend: [[label, colour]] }
  */
-export async function exportOverviewPdf({ data, reports, user, map }) {
+export async function exportOverviewPdf({ data, reports, user, map, ops = {} }) {
   // Loaded on demand so the PDF library only downloads when someone exports.
   const [{ jsPDF }, { default: autoTable }, logo] = await Promise.all([import('jspdf'), import('jspdf-autotable'), loadLogo()])
 
@@ -225,6 +225,62 @@ export async function exportOverviewPdf({ data, reports, user, map }) {
     expiring.map((c) => [c.title, c.category || '-', c.relatedTo || '-', c.status, shortDate(c.expiryDate)]),
     { columnStyles: { 4: { halign: 'right' } }, empty: 'Everything is in date.' },
   )
+
+  // Installations, site surveys and engineers -- the areas this user can see.
+  const panels = [
+    ops.installs && ['Installations', ops.installs.stats.completionRate + '% completed', [
+      ['Active jobs', ops.installs.stats.active],
+      ['Overdue', ops.installs.stats.overdue, ops.installs.stats.overdue > 0],
+      ['On hold', ops.installs.stats.onHold],
+      ['Awaiting handover', ops.installs.stats.awaitingHandover],
+      ['Next 14 days', ops.installs.stats.upcoming],
+      ['Completed this month', ops.installs.stats.completedThisMonth],
+    ]],
+    ops.surveys && ['Site surveys', ops.surveys.coverage + '% surveyed', [
+      ['Pending', ops.surveys.pending],
+      ['Overdue visits', ops.surveys.overdue, ops.surveys.overdue > 0],
+      ['In progress', ops.surveys.counts['In progress'] + ' (avg ' + ops.surveys.averageInProgress + '%)'],
+      ['Needs action', ops.surveys.withIssues, ops.surveys.withIssues > 0],
+      ['Visits next 7 days', ops.surveys.upcoming],
+      ['Completed this month', ops.surveys.completedThisMonth],
+    ]],
+    ops.engineers && ['Engineers', (ops.engineers.team.onTimeRate ?? '--') + '% on time', [
+      ['Engineers', ops.engineers.team.engineers],
+      ['Completed this month', ops.engineers.team.completedThisMonth],
+      ['Avg days to complete', ops.engineers.team.averageDaysToComplete ?? '--'],
+      ['Callbacks', (ops.engineers.team.callbackRate ?? '--') + '%'],
+      ['Handover recorded', (ops.engineers.team.handoverRate ?? '--') + '%'],
+      ['Unassigned active jobs', ops.engineers.unassigned.active, ops.engineers.unassigned.active > 0],
+    ]],
+  ].filter(Boolean)
+  if (panels.length) {
+    sectionTitle('Installations, surveys & engineers', 'Operations at a glance', 8)
+    const pgap = 12
+    const pw = (contentW - pgap * (panels.length - 1)) / panels.length
+    const ph = 30 + 6 * 16 + 10
+    if (y + ph > pageH - 50) { doc.addPage(); y = 56 }
+    panels.forEach(([title, headline, rows], i) => {
+      const x = M + i * (pw + pgap)
+      doc.setDrawColor(...LINE).setFillColor(250, 250, 253).roundedRect(x, y, pw, ph, 8, 8, 'FD')
+      doc.setTextColor(...INK).setFont('helvetica', 'bold').setFontSize(10).text(title, x + 12, y + 18)
+      doc.setTextColor(...BRAND).setFontSize(10).text(headline, x + pw - 12, y + 18, { align: 'right' })
+      rows.forEach(([label, value, alert], k) => {
+        const ry = y + 38 + k * 16
+        doc.setTextColor(...MUTED).setFont('helvetica', 'normal').setFontSize(8.5).text(label, x + 12, ry)
+        doc.setTextColor(...(alert ? [220, 38, 38] : INK)).setFont('helvetica', 'bold').text(String(value), x + pw - 12, ry, { align: 'right' })
+      })
+    })
+    y += ph + 22
+    if (ops.engineers?.engineers?.length) {
+      sectionTitle('Engineers', 'On time: completed by the day after the install date. Callbacks: support ticket after completion.', ops.engineers.engineers.length)
+      const rate = (v) => (v == null ? '-' : v + '%')
+      table(
+        ['ENGINEER', 'ACTIVE', 'COMPLETED', 'ON TIME', 'CALLBACKS', 'OVERDUE', 'NEXT 14 DAYS'],
+        ops.engineers.engineers.map((e) => [e.name, e.active, e.completed, rate(e.onTimeRate), rate(e.callbackRate), e.overdue, e.upcoming].map(String)),
+        { columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'right' }, 6: { halign: 'right' } }, empty: 'No engineers.' },
+      )
+    }
+  }
 
   // The Overview can load up to 50; the report keeps the latest 10.
   const recent = activities.slice(0, 10)

@@ -13,6 +13,11 @@
 // - allActivity: seeing everyone's recent activity. Others see only their own.
 // - systemDesign: the solar/battery system design on a job (MCS) and the System
 //   Design page (read = see it, update = design). Engineers and admins.
+//
+// siteSurveys is the Site Survey page (read = see, create/update = book and
+// fill in surveys). photos are job photos from survey to handover (create =
+// add, and remove your own; delete = remove anyone's). Completing a survey also
+// needs installationProgress, as it ticks the job's survey step.
 
 export const ROLES = ['admin', 'finance', 'sales', 'engineer']
 
@@ -35,23 +40,25 @@ export const PERMISSIONS = {
     dashboard: R, clients: ALL, leads: ALL, quotations: ALL, installations: ALL, tickets: ALL, grants: ALL,
     engineers: ALL, compliance: ALL, documents: ALL, stock: ALL, vans: ALL, tools: ALL, activities: R, users: ALL,
     quoteValues: R, installationProgress: ['update'], allActivity: R, systemDesign: RU,
+    siteSurveys: ALL, photos: ALL,
   },
   // Money: grant claims, quote values and payment terms, stock costs.
   finance: {
     dashboard: R, clients: R, leads: R, quotations: RU, installations: R, tickets: R, grants: RCU,
     engineers: R, compliance: R, documents: R, stock: RU, vans: R, tools: R, activities: R,
-    quoteValues: R,
+    quoteValues: R, siteSurveys: R, photos: R,
   },
   // Enquiry to accepted quote, and booking the job.
   sales: {
     dashboard: R, clients: RCU, leads: ALL, quotations: RCU, installations: RCU, tickets: RCU, grants: R,
     engineers: R, compliance: R, documents: R, stock: R, vans: R, tools: R, activities: R,
+    siteSurveys: RU, photos: RCU,
   },
   // Doing the work: job progress, certificates, support visits, kit. No prices.
   engineer: {
     dashboard: R, clients: R, installations: RU, tickets: RCU,
     engineers: R, compliance: RU, documents: R, stock: RU, vans: RU, tools: RU, activities: R,
-    installationProgress: ['update'], systemDesign: RU,
+    installationProgress: ['update'], systemDesign: RU, siteSurveys: RCU, photos: RCU,
   },
 }
 
@@ -74,6 +81,8 @@ export const AREAS = [
   { key: 'tickets', label: 'Post-Install Support', resources: ['tickets'] },
   { key: 'grants', label: 'OZEV Grants', resources: ['grants'] },
   { key: 'engineers', label: 'Engineers', resources: ['engineers'] },
+  { key: 'siteSurveys', label: 'Site Survey', resources: ['siteSurveys'] },
+  { key: 'photos', label: 'Job photos', resources: ['photos'] },
   { key: 'compliance', label: 'Compliance Hub', resources: ['compliance'] },
   { key: 'documents', label: 'Documents', resources: ['documents'] },
   { key: 'stock', label: 'Stock & Inventory', resources: ['stock'] },

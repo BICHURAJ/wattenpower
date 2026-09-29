@@ -26,7 +26,9 @@ export function createApp(config) {
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: false,
   }))
-  app.use(express.json({ limit: '2mb' }))
+  // Photos (base64) have their own, bigger limit in routes/photos.js.
+  const json = express.json({ limit: '2mb' })
+  app.use((req, res, next) => (req.path.startsWith('/api/photos') ? next() : json(req, res, next)))
   if (process.env.NODE_ENV !== 'test') app.use(morgan('dev'))
 
   app.get('/api/health', (req, res) => res.json({ ok: true, service: 'watten-power-api' }))

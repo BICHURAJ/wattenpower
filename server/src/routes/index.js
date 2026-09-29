@@ -10,6 +10,9 @@ import messageRoutes from './messages.js'
 import dashboardRoutes from './dashboard.js'
 import quotationRoutes from './quotations.js'
 import installationRoutes from './installations.js'
+import siteSurveyRoutes from './siteSurveys.js'
+import { engineerReport } from './engineerReport.js'
+import photoRoutes from './photos.js'
 
 import Client from '../models/Client.js'
 import Lead from '../models/Lead.js'
@@ -46,6 +49,9 @@ router.use('/messages', messageRoutes)
 router.use('/dashboard', dashboardRoutes)
 router.use('/quotations', quotationRoutes)
 router.use('/installations', installationRoutes)
+// Site surveys (Operations > Site Survey) and job photos (checked in photos.js).
+router.use('/site-surveys', authorize('siteSurveys'), siteSurveyRoutes)
+router.use('/photos', photoRoutes)
 
 // Delete a client. Quotations, installations and support tickets must keep
 // their client, so a client that has any is refused -- mark it Inactive instead.
@@ -121,6 +127,8 @@ router.post('/leads/:id/convert', requirePermission('clients', 'create'), async 
   } catch (err) { next(err) }
 })
 
+// Engineers analytics (Engineers page and PDF report), before the /:id routes.
+router.get('/engineers/report', engineerReport)
 router.use('/engineers', crudRouter(Engineer, { searchFields: ['name', 'email'], defaultSort: 'name' }))
 
 router.use('/tickets', crudRouter(Ticket, {

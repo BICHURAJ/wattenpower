@@ -1,11 +1,13 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { api, shortDate } from '../api'
+import { api, shortDate, quoteTotals } from '../api'
 import { PageHeader, Card, Table, Badge, Banner, Loading, Tabs, useFetch } from '../components/ui'
 import { useAuth } from '../auth'
 import {
-  normaliseProducts, ProductChips, DesignFields, DesignSummary, designForm, designPayload, kWpOf, mcsEstimate, stepsFor,
+  normaliseProducts, ProductChips, DesignFields, DesignSummary, designForm, designPayload, kWpOf, mcsEstimate, stepsFor, JobProgress,
 } from '../processes'
+import { proposalFigures, OCCUPANCY, ASSUMPTIONS } from '../solar/proposalCalc'
+import { approximateLocation } from '../components/LocationPicker'
 
 // System Design: the engineers' workspace for designing solar PV and battery
 // systems to MCS rules. It lists the jobs that need a design and opens each one
@@ -73,7 +75,7 @@ export function SystemDesignList() {
 
 export function SystemDesignEditor() {
   const { id } = useParams()
-  const { can } = useAuth()
+  const { can, user } = useAuth()
   const canDesign = can('systemDesign', 'update')
   const canProgress = can('installationProgress', 'update')
   const { data: job, loading, reload } = useFetch('/installations/' + id)
@@ -150,6 +152,18 @@ export function SystemDesignEditor() {
           ) : (
             <Card title="Design"><DesignSummary design={job.design} products={products} /></Card>
           )}
+
+          {products.includes('solar') && (
+            <ProposalCard
+              job={job}
+              values={values}
+              estimate={estimate}
+              editable={canDesign}
+              onChange={setForm}
+              canSeePrice={can('quotations', 'read')}
+              preparedBy={user?.name}
+            />
+          )}
         </div>
 
         <div className="space-y-4">
@@ -165,7 +179,7 @@ export function SystemDesignEditor() {
           </Card>
 
           <Card title="Design status">
-            <div className="flex items-center justify-between gap-3">
+            <div className={'flex items-center justify-between gap-3 rounded-xl px-3 py-2 -mx-1 ' + (designed ? 'bg-emerald-50' : 'bg-amber-50/60')}>
               <Badge tone={designed ? 'green' : 'amber'}>{designed ? 'Designed' : 'Not complete'}</Badge>
               {products.includes('solar') && (
                 <span className="text-sm text-slate-700">{estimate != null ? estimate.toLocaleString('en-GB') + ' kWh / yr' : 'No estimate yet'}</span>
@@ -183,8 +197,123 @@ export function SystemDesignEditor() {
               <p className="mt-2 text-xs text-slate-500">Fill in the panels and the MCS zone, Kk and shading factor to get the estimate.</p>
             )}
           </Card>
+
+          <Card title="Job progress" subtitle="Marking the design complete ticks its step on the job">
+            <JobProgress install={job} highlight="systemDesigned" />
+          </Card>
         </div>
       </div>
     </>
+  )
+}
+
+/**
+ * Customer proposal: the home's use and tariffs, the figures they give
+ * (self-use, savings, payback, CO2) and the branded PDF download. The inputs
+ * are saved with the design ("Save Design").
+ */
+function ProposalCard({ job, values, estimate, editable, onChange, canSeePrice, preparedBy }) {
+  const [quote, setQuote] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const quoteId = job.quotation?._id || job.quotation
+
+  // The price comes from the linked quotation, for people allowed to see quotes.
+  useEffect(() => {
+    if (!canSeePrice || !quoteId) return
+    let cancelled = false
+    api.get('/quotations/' + quoteId).then((q) => { if (!cancelled) setQuote(q) }).catch(() => {})
+    return () => { cancelled = true }
+  }, [canSeePrice, quoteId])
+
+  const price = quote ? quoteTotals(quote.items).total : null
+  const design = { ...values, estimatedAnnualKwh: estimate }
+  const f = estimate ? proposalFigures(design, { price }) : null
+  const set = (key) => (e) => onChange({ ...values, [key]: e.target.value })
+
+  const download = async () => {
+    setBusy(true)
+    setError('')
+    try {
+      const where = job.coordinates?.lat != null ? job.coordinates
+        : job.client?.location?.lat != null ? job.client.location
+        : await approximateLocation({ postcode: job.postcode || job.client?.postcode, address: job.address || job.client?.address }).catch(() => null)
+      const [{ exportProposalPdf }, { renderSiteImage }] = await Promise.all([import('../reports/proposal'), import('../reports/mapImage')])
+      const siteImage = where ? await renderSiteImage({ lat: where.lat, lng: where.lng }) : null
+      await exportProposalPdf({ job: { ...job, design }, quote, siteImage, preparedBy })
+    } catch (err) { setError('Could not create the proposal: ' + err.message) } finally { setBusy(false) }
+  }
+
+  const input = (key, props) => (
+    <input className="input" type="number" min="0" step="any" value={values[key]} onChange={set(key)} disabled={!editable} {...props} />
+  )
+  const priceHint = price
+    ? 'Price £' + Math.round(price).toLocaleString('en-GB') + ' (' + (quote.quoteNo || 'quote') + ')'
+    : canSeePrice ? 'Link a quotation to show' : 'Price not shown to your role'
+
+  return (
+    <Card title="Customer proposal" subtitle="A branded PDF for the customer, built from this MCS design">
+      <Banner onDismiss={() => setError('')}>{error}</Banner>
+      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <label className="block">
+          <span className="block text-xs font-medium text-slate-500 mb-1">Electricity use (kWh/yr)</span>
+          {input('consumptionKwh', { placeholder: String(ASSUMPTIONS.consumptionKwh), step: 100 })}
+        </label>
+        <label className="block">
+          <span className="block text-xs font-medium text-slate-500 mb-1">Occupancy</span>
+          <select className="input" value={values.occupancy || ''} onChange={set('occupancy')} disabled={!editable}>
+            <option value="">{OCCUPANCY[ASSUMPTIONS.occupancy].label} (default)</option>
+            {Object.entries(OCCUPANCY).map(([k, o]) => <option key={k} value={k}>{o.label}</option>)}
+          </select>
+        </label>
+        <label className="block">
+          <span className="block text-xs font-medium text-slate-500 mb-1">Import tariff (p/kWh)</span>
+          {input('importTariff', { placeholder: String(ASSUMPTIONS.importTariff), step: 0.01 })}
+        </label>
+        <label className="block">
+          <span className="block text-xs font-medium text-slate-500 mb-1">Export tariff (p/kWh)</span>
+          {input('exportTariff', { placeholder: String(ASSUMPTIONS.exportTariff), step: 0.01 })}
+        </label>
+      </div>
+      <p className="mt-1.5 text-xs text-slate-400">Blank fields use the defaults shown. Save the design to keep these for next time.</p>
+
+      {f ? (
+        <div className="mt-4 grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <Figure label="Used at home" value={f.energy.selfUse.toLocaleString('en-GB') + ' kWh'} hint={Math.round(f.energy.selfSufficiency * 100) + '% self-sufficient'} tone="amber" />
+          <Figure label="First-year saving" value={'£' + Math.round(f.firstYear.total).toLocaleString('en-GB')} hint={'Bills £' + Math.round(f.firstYear.importSaving) + ' + export £' + Math.round(f.firstYear.exportIncome)} tone="blue" />
+          <Figure label="Payback" value={f.payback ? f.payback + ' years' : price ? '25+ years' : '--'} hint={priceHint} tone="slate" />
+          <Figure label="CO2 saved" value={Math.round(f.co2.total).toLocaleString('en-GB') + ' kg/yr'} hint={'about ' + Math.round(f.co2.trees) + ' trees'} tone="green" />
+        </div>
+      ) : (
+        <p className="mt-4 rounded-xl bg-slate-50 px-3 py-3 text-sm text-slate-500">Fill in the panels and the MCS zone, Kk and shading factor to work out the proposal figures.</p>
+      )}
+
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs text-slate-400 max-w-md">
+          {price ? 'Includes the quote, order form and payback pages from ' + quote.quoteNo + '.'
+            : 'The quote and payback pages are added when a quotation is linked' + (canSeePrice ? '.' : ' and you can see prices.')}
+        </p>
+        <button type="button" className="btn-primary" disabled={!f || busy} onClick={download}>
+          {busy ? 'Building PDF...' : 'Download proposal PDF'}
+        </button>
+      </div>
+    </Card>
+  )
+}
+
+const FIGURE_TONES = {
+  amber: 'bg-amber-50 text-amber-800',
+  blue: 'bg-brand-50 text-brand-800',
+  slate: 'bg-slate-50 text-slate-800',
+  green: 'bg-emerald-50 text-emerald-800',
+}
+
+function Figure({ label, value, hint, tone }) {
+  return (
+    <div className={'rounded-xl px-3 py-2.5 ' + FIGURE_TONES[tone]}>
+      <p className="text-[11px] font-medium opacity-70">{label}</p>
+      <p className="text-base font-semibold">{value}</p>
+      {hint && <p className="text-[11px] opacity-70 truncate" title={hint}>{hint}</p>}
+    </div>
   )
 }

@@ -1,3 +1,6 @@
+import { SURVEY_SECTIONS, PHOTO_STAGES } from './surveyChecklist.js'
+import { HANDOVER_SECTIONS } from './handoverChecklist.js'
+
 // The products Watten Power installs and the steps each job goes through.
 // This is the one place to change a process: pages, lists, the map and the
 // server rules all read it (the web app gets it from GET /api/public/processes).
@@ -106,4 +109,10 @@ export const DESIGN_OPTIONS = {
 }
 
 /** What the web app needs (GET /api/public/processes). Configuration only, nothing private. */
-export const processesForClient = () => ({ products: PRODUCTS, steps: STEPS, designOptions: DESIGN_OPTIONS })
+export const processesForClient = () => ({
+  products: PRODUCTS,
+  steps: STEPS,
+  designOptions: DESIGN_OPTIONS,
+  survey: { sections: SURVEY_SECTIONS, photoStages: PHOTO_STAGES },
+  handover: { sections: HANDOVER_SECTIONS },
+})

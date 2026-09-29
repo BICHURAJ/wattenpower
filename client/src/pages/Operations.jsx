@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import EngineerPerformance from '../components/EngineerPerformance'
 import { api, qs, money, shortDate, inputDate } from '../api'
 import { useAuth } from '../auth'
 import { WEEK_DAYS, defaultWeek, scheduleOf, nextTimeOff, availabilityToday, hoursLabel, weekdayIndex } from '../availability'
@@ -677,8 +678,21 @@ const ENGINEER_ROLES =['Installation Engineer', 'Senior Engineer', 'Surveyor', '
 // Screen: Engineers -- who we have, and when they can be booked.
 export function Engineers() {
   const { data, loading, error, reload } = useFetch('/engineers' + qs({ limit: 100 }))
-  const { can } = useAuth()
+  const { can, user } = useAuth()
   const [filter, setFilter] = useState('All')
+  // Team (the engineers and their availability) or Performance (analytics).
+  const [view, setView] = useState('Team')
+  const performance = useFetch('/engineers/report')
+  const [exporting, setExporting] = useState(false)
+  const [exportError, setExportError] = useState('')
+  const exportReport = async () => {
+    setExporting(true)
+    setExportError('')
+    try {
+      const { exportEngineerReportPdf } = await import('../reports/engineerReport')
+      await exportEngineerReportPdf({ report: await api.get('/engineers/report'), user })
+    } catch (err) { setExportError('Could not create the report: ' + err.message) } finally { setExporting(false) }
+  }
   const [search, setSearch] = useState('')
   const [editing, setEditing] = useState(null) // null = closed, {} = new, engineer = edit
 
@@ -694,9 +708,26 @@ export function Engineers() {
   return (
     <>
       <PageHeader title="Engineers" subtitle="The people who carry out surveys, installs and repairs, and when they're free">
+        <button type="button" className="btn-secondary" disabled={exporting || !performance.data} onClick={exportReport}>
+          <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 17v3h16v-3" /></svg>
+          {exporting ? 'Building report...' : 'Export report'}
+        </button>
         {can('engineers', 'create') && <button className="btn-primary" onClick={() => setEditing({})}>+ Add Engineer</button>}
       </PageHeader>
       <Banner>{error}</Banner>
+      <Banner onDismiss={() => setExportError('')}>{exportError}</Banner>
+
+      <div className="mb-4 inline-flex gap-0.5 rounded-lg bg-white p-1 ring-1 ring-slate-100 shadow-soft">
+        {['Team', 'Performance'].map((v) => (
+          <button key={v} type="button" onClick={() => setView(v)}
+            className={'px-4 py-1.5 text-sm font-medium rounded-md ' + (view === v ? 'bg-brand-500 text-white' : 'text-slate-500 hover:text-slate-800')}>
+            {v}
+          </button>
+        ))}
+      </div>
+
+      {view === 'Performance' ? <EngineerPerformance report={performance.data} loading={performance.loading} error={performance.error} /> : (
+      <>
 
       <div className="flex flex-wrap items-start gap-3">
         <Tabs tabs={['All', 'Working today', 'Off today']} active={filter} onChange={setFilter} />
@@ -779,6 +810,8 @@ export function Engineers() {
           )
         })}
       </div>
+      </>
+      )}
 
       {editing && (
         <EngineerModal

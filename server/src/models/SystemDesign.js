@@ -38,6 +38,12 @@ export const SystemDesignSchema = new mongoose.Schema({
   shadingFactor: { ...amount, max: 1 }, // SF, 0-1
   // kWp x Kk x SF, worked out on save (kWh / year)
   estimatedAnnualKwh: { ...amount, max: 1000000 },
+  // Customer proposal: the home's use and tariffs, for the self-consumption,
+  // savings and payback figures (client/src/solar/proposalCalc.js).
+  consumptionKwh: { ...amount, max: 1000000 }, // kWh / year
+  occupancy: { type: String, enum: ['', 'home all day', 'in half the day', 'out all day'], default: '' },
+  importTariff: { ...amount, max: 500 }, // p/kWh
+  exportTariff: { ...amount, max: 500 }, // p/kWh
   notes: String,
 }, { _id: false, toJSON: { virtuals: true }, toObject: { virtuals: true } })
 

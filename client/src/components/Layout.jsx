@@ -37,6 +37,7 @@ const NAV_GROUPS = [
     label: 'Operations',
     items: [
       { to: '/engineers', label: 'Engineers', resource: 'engineers', icon: 'M17 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9.5 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z' },
+      { to: '/site-survey', label: 'Site Survey', resource: 'siteSurveys', icon: 'M9 3h6l1 2h3v16H5V5h3l1-2Zm-1 9 2.5 2.5L16 9' },
       { to: '/system-design', label: 'System Design', resource: 'systemDesign', icon: 'M12 3v2m0 14v2M5.6 5.6l1.4 1.4m10 10 1.4 1.4M3 12h2m14 0h2M5.6 18.4 7 17m10-10 1.4-1.4M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z' },
       { to: '/compliance', label: 'Compliance Hub', resource: 'compliance', icon: 'M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3Z' },
       { to: '/documents', label: 'Documents', resource: 'documents', icon: 'M6 2h9l5 5v15H6V2Z' },
