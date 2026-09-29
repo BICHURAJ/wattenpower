@@ -48,6 +48,9 @@ router.post('/:id/accept', async (req, res, next) => {
         client: quote.client?._id || quote.client,
         site: quote.site,
         quotation: quote._id,
+        // The job installs what was quoted. The system design is done on the
+        // job by the engineer (MCS), not on the quote.
+        products: quote.products,
         status: 'Scheduled',
         progress: { siteSurveyCompleted: true, quotationAccepted: true },
       })

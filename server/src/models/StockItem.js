@@ -3,7 +3,7 @@ import mongoose from 'mongoose'
 // Screen 15 -- the "Stock (Just-in-Time Inventory)" and "UK Suppliers" nodes.
 const StockItemSchema = new mongoose.Schema({
   name: { type: String, required: true },
-  category: { type: String, enum: ['Chargers', 'Accessories', 'Electrical', 'Consumables'], default: 'Electrical' },
+  category: { type: String, enum: ['Chargers', 'Solar Panels', 'Inverters', 'Batteries', 'Mounting', 'Accessories', 'Electrical', 'Consumables'], default: 'Electrical' },
   stock: { type: Number, default: 0 },
   unit: { type: String, default: 'pcs' },
   reorderLevel: { type: Number, default: 0 },

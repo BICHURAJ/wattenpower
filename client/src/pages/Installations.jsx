@@ -9,7 +9,11 @@ import { useAuth } from '../auth'
 import LocationPicker from '../components/LocationPicker'
 import { LocationPanel, LocationModal } from '../components/LocationPanel'
 import { directionsUrl } from '../components/LocationPicker'
-import { useInstallationLocations, progressOf, phaseOf, pinColour, TOTAL_STEPS } from '../components/InstallationMap'
+import { useInstallationLocations, phaseOf, pinColour } from '../components/InstallationMap'
+import {
+  stepsFor, progressOf, normaliseProducts, productLabel, ProductChips, ProductPicker,
+  DesignFields, DesignSummary, designForm, designPayload, needsDesign, kWpOf,
+} from '../processes'
 import { StaticMap, useMapPrefs, streetViewUrl } from '../components/mapView'
 
 const STATUSES = ['All', 'Scheduled', 'In Progress', 'Completed', 'On Hold', 'Cancelled']
@@ -40,6 +44,13 @@ async function confirmAndDelete(install) {
   return true
 }
 
+// Standards to follow, per product (shown on the job's Compliance tab).
+const REGULATIONS = {
+  ev: ['IET Code of Practice for EV Charging Equipment Installation (5th Edition)'],
+  solar: ['MCS MIS 3002 (Solar PV) and the MCS Installer Standards', 'DNO connection: ENA G98 (up to 16 A per phase) or G99 (larger, apply before installing)', 'Roof works: scaffolding and working-at-height plan'],
+  battery: ['IET Code of Practice for Electrical Energy Storage Systems', 'MCS MIS 3012 (battery storage)', 'DNO connection: ENA G98 / G99'],
+}
+
 const PinIcon = () => (
   <svg className="w-3.5 h-3.5 shrink-0 mt-px" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
     <path d="M12 21s-7-6.1-7-11.5a7 7 0 0 1 14 0C19 14.9 12 21 12 21Z" /><circle cx="12" cy="9.5" r="2.5" />
@@ -57,8 +68,9 @@ const segmentClass = (active) =>
 
 /** One installation as a card: where it is on top, then the job details. */
 function InstallationCard({ install, where, locating, base, onOpen, onDelete, deleting }) { // onDelete omitted = no Delete button
-  const done = progressOf(install)
+  const { done, total } = progressOf(install)
   const colour = pinColour(install)
+  const kWp = kWpOf(install.design)
   const address = where?.address || [install.address, install.postcode].filter(Boolean).join(', ') || install.site
   const stop = (e) => e.stopPropagation()
   return (
@@ -91,19 +103,22 @@ function InstallationCard({ install, where, locating, base, onOpen, onDelete, de
           <span className="text-xs text-slate-400 whitespace-nowrap">{install.installDate ? shortDate(install.installDate) : 'Not booked'}</span>
         </div>
         <p className="text-sm text-slate-700 truncate">{install.client?.name || '--'}</p>
+        <ProductChips products={install.products} size="xs" />
         <p className="flex gap-1 text-xs text-slate-500">
           <PinIcon />
           <span className="line-clamp-2">{address || 'No address'}</span>
         </p>
         <p className="text-xs text-slate-500 truncate">
           {install.engineer?.name || <span className="text-slate-400">Unassigned</span>}
-          {install.chargerModel ? ' · ' + install.chargerModel : ''}
+          {normaliseProducts(install.products).includes('solar') && kWp ? ' · ' + kWp + ' kWp' : ''}
+          {install.design?.batteryKwh && normaliseProducts(install.products).includes('battery') ? ' · ' + install.design.batteryKwh + ' kWh' : ''}
+          {install.chargerModel && normaliseProducts(install.products).includes('ev') ? ' · ' + install.chargerModel : ''}
         </p>
         <div className="mt-auto pt-2">
           <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
-            <div className="h-full rounded-full" style={{ width: (done / TOTAL_STEPS) * 100 + '%', background: colour }} />
+            <div className="h-full rounded-full" style={{ width: (done / total) * 100 + '%', background: colour }} />
           </div>
-          <p className="mt-1 text-[11px] text-slate-400">Progress {done}/{TOTAL_STEPS} · {phaseOf(install)}</p>
+          <p className="mt-1 text-[11px] text-slate-400">Progress {done}/{total} · {phaseOf(install)}</p>
         </div>
       </div>
 
@@ -130,11 +145,18 @@ function InstallationCard({ install, where, locating, base, onOpen, onDelete, de
 // Screen 9: Installations List
 export function InstallationsList() {
   const [search, setSearch] = useState('')
+  // Searched a moment after typing stops, not on every key.
+  const [query, setQuery] = useState('')
+  useEffect(() => {
+    const timer = setTimeout(() => setQuery(search.trim()), 300)
+    return () => clearTimeout(timer)
+  }, [search])
   const [status, setStatus] = useState('All')
+  const [product, setProduct] = useState('All')
   const [page, setPage] = useState(1)
   const [showNew, setShowNew] = useState(false)
   const navigate = useNavigate()
-  const { data, loading, error, reload } = useFetch('/installations' + qs({ q: search, status, page }))
+  const { data, loading, error, reload } = useFetch('/installations' + qs({ q: query, status, products: product, page }))
   const [deletingId, setDeletingId] = useState(null)
   const [actionError, setActionError] = useState('')
   const [notice, setNotice] = useState('')
@@ -167,6 +189,7 @@ export function InstallationsList() {
   const columns = [
     { key: 'installNo', header: 'Install No.', render: (r) => <span className="font-medium text-slate-900">{r.installNo}</span> },
     { key: 'client', header: 'Client', render: (r) => r.client?.name || '--' },
+    { key: 'products', header: 'Installing', render: (r) => <ProductChips products={r.products} size="xs" /> },
     { key: 'site', header: 'Site' },
     { key: 'installDate', header: 'Install Date', render: (r) => shortDate(r.installDate) },
     { key: 'status', header: 'Status', render: (r) => <Badge>{r.status}</Badge> },
@@ -193,7 +216,7 @@ export function InstallationsList() {
 
   return (
     <>
-      <PageHeader title="Installations" subtitle="Every job from survey through to handover">
+      <PageHeader title="Installations" subtitle="EV charger, solar PV and battery jobs, from survey through to handover">
         {can('installations', 'create') && <button className="btn-primary" onClick={() => setShowNew(true)}>+ New Installation</button>}
       </PageHeader>
 
@@ -203,8 +226,13 @@ export function InstallationsList() {
 
       <Card bodyClass="">
         <div className="flex flex-wrap gap-2 p-4 border-b border-slate-200">
-          <SearchInput value={search} onChange={(v) => { setSearch(v); setPage(1) }} placeholder="Search installations..." />
+          <SearchInput value={search} onChange={(v) => { setSearch(v); setPage(1) }} placeholder="Search customer, address, postcode, phone, EV, solar, battery, engineer, job no..." />
           <Select value={status} onChange={(v) => { setStatus(v); setPage(1) }} options={STATUSES} />
+          <Select
+            value={product}
+            onChange={(v) => { setProduct(v); setPage(1) }}
+            options={[{ value: 'All', label: 'All products' }, ...['ev', 'solar', 'battery'].map((k) => ({ value: k, label: productLabel(k) }))]}
+          />
           <div className="ml-auto flex flex-wrap gap-2">
             {view === 'Cards' && (
               <div className="flex gap-0.5 rounded-lg bg-slate-100 p-0.5" title="Picture on the cards">
@@ -256,7 +284,8 @@ export function InstallationsList() {
 const EDIT_STATUSES = STATUSES.filter((s) => s !== 'All')
 
 const emptyInstallation = () => ({
-  client: '', quotation: '', site: '', installDate: '', engineer: '', chargerModel: '', supplyType: 'Single Phase', location: '', accessNotes: '',
+  client: '', quotation: '', site: '', installDate: '', engineer: '', products: ['ev'],
+  chargerModel: '', supplyType: 'Single Phase', location: '', accessNotes: '',
   address: '', postcode: '', coordinates: null, status: 'Scheduled',
 })
 
@@ -269,6 +298,7 @@ const installationForm = (install) => {
     site: install.site || '',
     installDate: inputDate(install.installDate),
     engineer: install.engineer?._id || install.engineer || '',
+    products: normaliseProducts(install.products),
     chargerModel: install.chargerModel || '',
     supplyType: install.supplyType || 'Single Phase',
     location: install.location || '',
@@ -311,7 +341,14 @@ function InstallationFormModal({ open, install, onClose, onSaved }) {
         if (pickAcceptedQuote.current) {
           pickAcceptedQuote.current = false
           const accepted = quotes.find((q) => q.status === 'Accepted')
-          if (accepted) setForm((f) => ({ ...f, quotation: accepted._id, site: f.site || accepted.site || '' }))
+          if (accepted) {
+            setForm((f) => ({
+              ...f,
+              quotation: accepted._id,
+              site: f.site || accepted.site || '',
+              products: normaliseProducts(accepted.products),
+            }))
+          }
         }
       })
       .catch(() => {})
@@ -319,7 +356,13 @@ function InstallationFormModal({ open, install, onClose, onSaved }) {
   }, [form.client])
   const chooseQuote = (e) => {
     const quote = clientQuotes.find((q) => q._id === e.target.value)
-    setForm((f) => ({ ...f, quotation: e.target.value, site: f.site || quote?.site || '' }))
+    setForm((f) => ({
+      ...f,
+      quotation: e.target.value,
+      site: f.site || quote?.site || '',
+      // The job installs what was quoted.
+      ...(quote && { products: normaliseProducts(quote.products) }),
+    }))
   }
 
   // Choosing a client (or one of their sites) fills in the job address and pin,
@@ -359,7 +402,8 @@ function InstallationFormModal({ open, install, onClose, onSaved }) {
     e.preventDefault()
     setBusy(true)
     try {
-      const payload = { ...form }
+      const chosen = normaliseProducts(form.products)
+      const payload = { ...form, products: chosen }
       if (!canProgress) delete payload.status
       if (editing) {
         // null (not a missing key) so unassigning an engineer or clearing the pin sticks.
@@ -383,6 +427,9 @@ function InstallationFormModal({ open, install, onClose, onSaved }) {
     <Modal open={open} title={editing ? 'Edit Installation ' + install.installNo : 'New Installation'} onClose={onClose} width="max-w-2xl">
       <Banner onDismiss={() => setError('')}>{error}</Banner>
       <form onSubmit={save} className="space-y-4">
+        <Field label="What's being installed" required>
+          <ProductPicker value={form.products} onChange={(products) => setForm((f) => ({ ...f, products }))} />
+        </Field>
         <div className="grid sm:grid-cols-2 gap-4">
           <Field label="Client" required>
             <select className="input" value={form.client} onChange={chooseClient} required>
@@ -419,13 +466,17 @@ function InstallationFormModal({ open, install, onClose, onSaved }) {
               </select>
             </Field>
           )}
-          <Field label="Charger Model"><input className="input" value={form.chargerModel} onChange={set('chargerModel')} /></Field>
           <Field label="Supply Type">
             <select className="input" value={form.supplyType} onChange={set('supplyType')}>
               <option>Single Phase</option><option>Three Phase</option>
             </select>
           </Field>
-          <Field label="Fit Point"><input className="input" value={form.location} onChange={set('location')} placeholder="e.g. Garage - right wall" /></Field>
+          {form.products.includes('ev') && (
+            <>
+              <Field label="Charger Model"><input className="input" value={form.chargerModel} onChange={set('chargerModel')} /></Field>
+              <Field label="Charger Fit Point"><input className="input" value={form.location} onChange={set('location')} placeholder="e.g. Garage - right wall" /></Field>
+            </>
+          )}
           <Field label="Access Notes"><input className="input" value={form.accessNotes} onChange={set('accessNotes')} /></Field>
         </div>
 
@@ -450,19 +501,62 @@ function InstallationFormModal({ open, install, onClose, onSaved }) {
   )
 }
 
-const STAGES = [
-  ['siteSurveyCompleted', 'Site Survey Completed'],
-  ['quotationAccepted', 'Quotation Accepted'],
-  ['installationInProgress', 'Installation In Progress'],
-  ['testingCertification', 'Testing & Certification'],
-  ['handover', 'Handover'],
-]
+/**
+ * The job's solar / battery system design. Engineers (and admins) design it here
+ * to MCS rules; everyone else sees it read-only. Not part of the quotation.
+ */
+function SystemDesignPanel({ install, products, canDesign, onSaved }) {
+  const [editing, setEditing] = useState(false)
+  const [form, setForm] = useState(() => designForm(install.design))
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+
+  const start = () => { setForm(designForm(install.design)); setError(''); setNotice(''); setEditing(true) }
+  const save = async (e) => {
+    e.preventDefault()
+    setBusy(true)
+    setError('')
+    try {
+      await api.put('/installations/' + install._id, { design: designPayload(form) })
+      setEditing(false)
+      setNotice('Design saved.')
+      onSaved()
+    } catch (err) { setError(err.message) } finally { setBusy(false) }
+  }
+
+  if (editing) {
+    return (
+      <form onSubmit={save} className="py-2 space-y-4">
+        <Banner onDismiss={() => setError('')}>{error}</Banner>
+        <DesignFields value={form} onChange={setForm} products={products} />
+        <div className="flex justify-end gap-2">
+          <button type="button" className="btn-secondary" onClick={() => setEditing(false)}>Cancel</button>
+          <button className="btn-primary" disabled={busy}>{busy ? 'Saving...' : 'Save Design'}</button>
+        </div>
+      </form>
+    )
+  }
+
+  return (
+    <div className="py-2">
+      <Banner kind="success" onDismiss={() => setNotice('')}>{notice}</Banner>
+      <DesignSummary design={install.design} products={products} />
+      {canDesign
+        ? (
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <button className="btn-secondary" onClick={start}>{install.design ? 'Edit design' : 'Start the design'}</button>
+            <Link to={'/system-design/' + install._id} className="text-sm text-brand-600 hover:underline">Open in System Design</Link>
+          </div>
+        )
+        : <p className="mt-4 text-xs text-slate-400">The system is designed by the engineer to MCS standards.</p>}
+    </div>
+  )
+}
+
 // Final step of the Progress panel: ticking it sets the job's status to Completed.
+// The steps before it depend on the job's products (see processes).
 const COMPLETED = 'completed'
-const PROGRESS_PANEL = [...STAGES, [COMPLETED, 'Completed']]
-const QUOTE_STEP = PROGRESS_PANEL.findIndex(([key]) => key === 'quotationAccepted')
-// Steps that cannot be unticked once done.
-const FINAL_STEPS = ['siteSurveyCompleted']
 
 // Screen 10: Installation Details
 export function InstallationDetails() {
@@ -510,12 +604,17 @@ export function InstallationDetails() {
   const quote = install.quotation || null
   const quoteAccepted = quote?.status === 'Accepted'
 
+  // This job's steps (they depend on what's being installed), then Completed.
+  const products = normaliseProducts(install.products)
+  const panel = [...stepsFor(products), { key: COMPLETED, label: 'Completed' }]
+  const quoteStep = panel.findIndex((step) => step.fromQuote)
+
   const toggleStage = async (key) => {
     try {
       // The last step is the job's status, not a progress flag.
       const change = key === COMPLETED
         ? { status: install.status === 'Completed' ? 'In Progress' : 'Completed' }
-        : { progress: { ...install.progress, [key]: !install.progress[key] } }
+        : { progress: { ...(install.progress || {}), [key]: !install.progress?.[key] } }
       await api.put('/installations/' + id, change)
       reload()
     } catch (err) { setError(err.message) }
@@ -594,10 +693,11 @@ export function InstallationDetails() {
               <span className="text-sm font-semibold text-slate-900">{install.installNo}</span>
               <Badge>{install.status}</Badge>
             </div>
-            <Tabs tabs={['Overview', 'Tasks', 'Compliance', 'Notes']} active={tab} onChange={setTab} />
+            <Tabs tabs={needsDesign(products) ? ['Overview', 'System', 'Tasks', 'Compliance', 'Notes'] : ['Overview', 'Tasks', 'Compliance', 'Notes']} active={tab} onChange={setTab} />
 
             {tab === 'Overview' && (
               <dl className="grid sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
+                <div className="sm:col-span-2"><Row label="Installing"><ProductChips products={products} /></Row></div>
                 <Row label="Client">{install.client?.name}</Row>
                 <Row label="Quotation">
                   {install.quotation
@@ -608,9 +708,12 @@ export function InstallationDetails() {
                 <Row label="Engineer">{install.engineer?.name || 'Unassigned'}</Row>
                 <Row label="Site">{install.site || '--'}</Row>
                 <Row label="Install Date">{shortDate(install.installDate)}</Row>
-                <Row label="Charger Model">{install.chargerModel || '--'}</Row>
                 <Row label="Supply Type">{install.supplyType}</Row>
-                <Row label="Fit Point">{install.location || '--'}</Row>
+                {products.includes('ev') && <Row label="Charger Model">{install.chargerModel || '--'}</Row>}
+                {products.includes('ev') && <Row label="Charger Fit Point">{install.location || '--'}</Row>}
+                {needsDesign(products) && (
+                  <Row label="System">{[kWpOf(install.design) && products.includes('solar') && kWpOf(install.design) + ' kWp solar', products.includes('battery') && install.design?.batteryKwh && install.design.batteryKwh + ' kWh battery'].filter(Boolean).join(' + ') || <span className="text-slate-400">No design yet</span>}</Row>
+                )}
                 <Row label="Access Notes">{install.accessNotes || '--'}</Row>
                 <div className="sm:col-span-2">
                   <Row label="Address">
@@ -632,6 +735,10 @@ export function InstallationDetails() {
               </dl>
             )}
 
+            {tab === 'System' && (
+              <SystemDesignPanel install={install} products={products} canDesign={can('systemDesign', 'update')} onSaved={reload} />
+            )}
+
             {tab === 'Tasks' && (
               <div className="divide-y divide-slate-100">
                 {(install.tasks || []).length === 0 && <p className="py-6 text-sm text-slate-400 text-center">No tasks added to this job.</p>}
@@ -650,7 +757,7 @@ export function InstallationDetails() {
                   <div>
                     <p className="text-sm font-medium text-amber-900">DNO Notification</p>
                     <p className="text-xs text-amber-700 mt-0.5">
-                      The local electricity network operator must be told that a charger has been added.
+                      The local electricity network operator must be told about new {products.map((p) => productLabel(p).toLowerCase()).join(' and ')} equipment on the supply.
                     </p>
                   </div>
                   {install.dnoNotified
@@ -659,7 +766,7 @@ export function InstallationDetails() {
                 </div>
                 <ul className="text-sm text-slate-600 space-y-1.5 list-disc pl-5">
                   <li>IET Wiring Regulations (18th Edition, BS 7671)</li>
-                  <li>Code of Practice for EV Charging Equipment Installation (5th Edition)</li>
+                  {[...new Set(products.flatMap((p) => REGULATIONS[p] || []))].map((rule) => <li key={rule}>{rule}</li>)}
                   <li>Sign-off by an NICEIC or NAPIT certified electrician</li>
                 </ul>
               </div>
@@ -704,14 +811,15 @@ export function InstallationDetails() {
             </p>
           )}
           <ol className="space-y-3">
-            {PROGRESS_PANEL.map(([key, label], index) => {
-              const isQuoteStep = key === 'quotationAccepted'
-              const done = key === COMPLETED ? install.status === 'Completed' : isQuoteStep ? quoteAccepted : install.progress?.[key]
-              // Steps after the quote wait for it to be accepted; ones already ticked can still be unticked.
-              const locked = index > QUOTE_STEP && !quoteAccepted && !done
+            {panel.map((step, index) => {
+              const { key, label } = step
               // Driven by the quotation status, so never ticked by hand.
-              const fromQuote = isQuoteStep
-              const final = done && FINAL_STEPS.includes(key)
+              const fromQuote = Boolean(step.fromQuote)
+              const done = key === COMPLETED ? install.status === 'Completed' : fromQuote ? quoteAccepted : Boolean(install.progress?.[key])
+              // Steps after the quote wait for it to be accepted; ones already ticked can still be unticked.
+              const locked = index > quoteStep && !quoteAccepted && !done
+              // Some steps (the survey) can't be unticked once done.
+              const final = done && Boolean(step.final)
               const disabled = locked || fromQuote || final || onHold || !canProgress
               let hint = done ? 'Completed' : 'Pending'
               if (locked) hint = 'Waiting for quote acceptance'

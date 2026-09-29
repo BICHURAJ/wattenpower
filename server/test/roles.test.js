@@ -97,6 +97,14 @@ test('only engineers and admins change job progress, whatever their tab access',
   assert.equal(userCan({ role: 'sales', access: { installations: 'full' } }, 'installationProgress', 'update'), false)
 })
 
+test('only engineers and admins do the system design (MCS)', () => {
+  assert.equal(can('engineer', 'systemDesign', 'update'), true)
+  assert.equal(can('admin', 'systemDesign', 'update'), true)
+  assert.equal(can('sales', 'systemDesign', 'update'), false)
+  assert.equal(can('finance', 'systemDesign', 'update'), false)
+  assert.equal(userCan({ role: 'sales', access: { installations: 'full' } }, 'systemDesign', 'update'), false)
+})
+
 test('HTTP requests map to the right action', () => {
   assert.equal(actionFor({ method: 'GET', path: '/abc' }), 'read')
   assert.equal(actionFor({ method: 'POST', path: '/' }), 'create')

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { maplibregl, createMap, useMapPrefs, MapViewToggle, NoWebGL, streetViewUrl } from './mapView'
 import { shortDate } from '../api'
 import { geocodePostcodes, hasPoint, normalisePostcode } from './LocationPicker'
+import { progressOf as processProgress, normaliseProducts, productLabel, kWpOf } from '../processes'
 
 // Pin colours per installation status (logo blue/green where it fits).
 export const STATUS_COLOURS = {
@@ -13,12 +14,10 @@ export const STATUS_COLOURS = {
   Cancelled: '#ef4444',
 }
 
-const PROGRESS_STEPS = ['siteSurveyCompleted', 'quotationAccepted', 'installationInProgress', 'testingCertification', 'handover']
-
-// Progress out of six: the five stages, then Completed (the job's status).
-export const TOTAL_STEPS = PROGRESS_STEPS.length + 1
-export const progressOf = (inst) =>
-  inst.status === 'Completed' ? TOTAL_STEPS : PROGRESS_STEPS.filter((k) => inst.progress?.[k]).length
+// Progress uses the job's own steps, which depend on its products (EV, solar,
+// battery -- see processes). The last step is always Completed (the status).
+export const progressOf = (inst) => processProgress(inst).done
+export const totalStepsOf = (inst) => processProgress(inst).total
 
 // Pins show one of three phases, worked out from progress: nothing ticked yet
 // is Scheduled, any stage ticked is In Progress, and Completed once the job is.
@@ -32,8 +31,8 @@ const INACTIVE_COLOURS = { 'On Hold': '#94a3b8', Cancelled: '#475569' }
 
 export const phaseOf = (inst) => {
   if (INACTIVE_COLOURS[inst.status]) return inst.status
-  const done = progressOf(inst)
-  if (done === TOTAL_STEPS) return 'Completed'
+  const { done, total } = processProgress(inst)
+  if (done === total) return 'Completed'
   return done > 0 || inst.status === 'In Progress' ? 'In Progress' : 'Scheduled'
 }
 
@@ -73,15 +72,20 @@ function locate(inst, postcodePoints) {
 }
 
 function installationHtml(inst, where) {
-  const done = progressOf(inst)
+  const { done, total } = processProgress(inst)
   const colour = STATUS_COLOURS[inst.status] || '#94a3b8'
+  const products = normaliseProducts(inst.products)
+  const kWp = kWpOf(inst.design)
   const rows = [
+    ['Installing', products.map(productLabel).join(' + ')],
     ['Client', inst.client?.name],
     ['Site', inst.site],
     ['Address', where.address],
     ['Date', inst.installDate ? shortDate(inst.installDate) : 'Not booked'],
     ['Engineer', inst.engineer ? inst.engineer.name + (inst.engineer.phone ? ' · ' + inst.engineer.phone : '') : 'Unassigned'],
-    ['Charger', [inst.chargerModel, inst.supplyType].filter(Boolean).join(' · ')],
+    ['Solar', products.includes('solar') && kWp ? kWp + ' kWp' + (inst.design?.panelCount ? ' (' + inst.design.panelCount + ' panels)' : '') : null],
+    ['Battery', products.includes('battery') && inst.design?.batteryKwh ? inst.design.batteryKwh + ' kWh' : null],
+    ['Charger', products.includes('ev') ? [inst.chargerModel, inst.supplyType].filter(Boolean).join(' · ') : null],
     ['Fit point', inst.location],
     ['Access', inst.accessNotes],
     ['DNO', inst.dnoNotified ? 'Notified' : 'Not notified'],
@@ -95,9 +99,9 @@ function installationHtml(inst, where) {
       </div>
       <table>${rows.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join('')}</table>
       <div class="wp-inst-progress">
-        <span style="width:${(done / TOTAL_STEPS) * 100}%;background:${pinColour(inst)}"></span>
+        <span style="width:${(done / total) * 100}%;background:${pinColour(inst)}"></span>
       </div>
-      <div class="wp-inst-foot">Progress ${done}/${TOTAL_STEPS} (${esc(phaseOf(inst))}) · Located by ${esc(where.precision.toLowerCase())}</div>
+      <div class="wp-inst-foot">Progress ${done}/${total} (${esc(phaseOf(inst))}) · Located by ${esc(where.precision.toLowerCase())}</div>
     </div>`
 }
 

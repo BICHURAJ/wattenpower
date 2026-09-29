@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, qs, money, shortDate, inputDate, lineAmounts, quoteTotals } from '../api'
 import {
@@ -7,8 +7,19 @@ import {
 } from '../components/ui'
 import { exportQuotationPdf } from '../reports/quotation'
 import { useAuth } from '../auth'
+import { normaliseProducts, ProductChips, ProductPicker } from '../processes'
 
 const STATUSES = ['All', 'Draft', 'Sent', 'Accepted', 'Declined', 'Expired']
+
+// Starting lines for a new quote, per product. Residential solar panels and
+// batteries are 0% VAT in the UK (energy-saving materials, until March 2027);
+// EV chargers are standard rate.
+const DEFAULT_ITEMS = {
+  ev: { description: 'EV Charger Installation', qty: 1, unitPrice: 1000, vat: 20 },
+  solar: { description: 'Solar PV system - supply & installation', qty: 1, unitPrice: 5500, vat: 0 },
+  battery: { description: 'Battery storage - supply & installation', qty: 1, unitPrice: 4000, vat: 0 },
+}
+const defaultItems = (products) => normaliseProducts(products).map((p) => ({ ...DEFAULT_ITEMS[p] }))
 
 const DownloadIcon = () => (
   <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
@@ -53,6 +64,7 @@ export function QuotationsList() {
   const columns = [
     { key: 'quoteNo', header: 'Quote No.', render: (r) => <span className="font-medium text-slate-900">{r.quoteNo}</span> },
     { key: 'client', header: 'Client', render: (r) => r.client?.name || '--' },
+    { key: 'products', header: 'For', render: (r) => <ProductChips products={r.products} size="xs" /> },
     { key: 'site', header: 'Site' },
     { key: 'total', header: 'Amount', render: (r) => money(r.total) },
     { key: 'status', header: 'Status', render: (r) => <Badge>{r.status}</Badge> },
@@ -142,18 +154,28 @@ function QuotationForm({ quote }) {
         financeOption: quote.financeOption || 'None',
         notes: quote.notes || '',
         status: quote.status,
+        products: normaliseProducts(quote.products),
       }
     : {
         client: '', site: '', quoteDate: inputDate(new Date()), validUntil: '', reference: '',
-        financeOption: 'Pay in Full', notes: '',
+        financeOption: 'Pay in Full', notes: '', products: ['ev'],
       }))
   const [items, setItems] = useState(() => (editing
     ? quote.items.map(({ description, qty, unitPrice, vat }) => ({ description, qty, unitPrice, vat }))
-    : [{ description: 'EV Charger Installation', qty: 1, unitPrice: 1000, vat: 20 }]))
+    : defaultItems(['ev'])))
+  // On a new quote, the lines follow the chosen products until someone edits them.
+  const itemsEdited = useRef(editing)
+  const chooseProducts = (products) => {
+    setForm((f) => ({ ...f, products }))
+    if (!itemsEdited.current) setItems(defaultItems(products))
+  }
+  // The system design isn't part of the quote: the engineer designs it on the job (MCS).
+  const productFields = () => ({ products: normaliseProducts(form.products) })
 
   const set = (key) => (e) => setForm({ ...form, [key]: e.target.value })
 
   const updateItem = (index, key, value) => {
+    itemsEdited.current = true
     const next = [...items]
     next[index] = { ...next[index], [key]: key === 'description' ? value : Number(value) }
     setItems(next)
@@ -168,7 +190,7 @@ function QuotationForm({ quote }) {
     setBusy(true)
     setError('')
     try {
-      const quote = await api.post('/quotations', { ...form, items, status: 'Draft' })
+      const quote = await api.post('/quotations', { ...form, ...productFields(), items, status: 'Draft' })
       if (status === 'Sent') await api.post('/quotations/' + quote._id + '/send')
       navigate('/quotations/' + quote._id)
     } catch (err) { setError(err.message) } finally { setBusy(false) }
@@ -184,6 +206,7 @@ function QuotationForm({ quote }) {
       const action = statusChanged && STATUS_ACTIONS[status]
       await api.put('/quotations/' + quote._id, {
         ...fields,
+        ...productFields(),
         validUntil: fields.validUntil || null,
         items,
         // Draft / Expired have no workflow step, so they are set directly.
@@ -208,6 +231,11 @@ function QuotationForm({ quote }) {
       <Banner onDismiss={() => setError('')}>{error}</Banner>
 
       <div className="space-y-4 max-w-4xl">
+        <Card title="What's being quoted">
+          <ProductPicker value={form.products} onChange={chooseProducts} />
+          {!editing && <p className="mt-2 text-xs text-slate-400">The quote lines below start from what you pick; edit them freely.</p>}
+        </Card>
+
         <Card title="Client Information">
           <div className="grid sm:grid-cols-2 gap-4">
             <Field label="Select Client" required>
@@ -280,7 +308,7 @@ function QuotationForm({ quote }) {
                     <td className="py-1.5 pl-2 text-right text-slate-700">{money(lineAmounts(item).total)}</td>
                     <td className="text-center">
                       {items.length > 1 && (
-                        <button className="text-slate-400 hover:text-red-500" onClick={() => setItems(items.filter((_, i) => i !== index))}>&times;</button>
+                        <button className="text-slate-400 hover:text-red-500" onClick={() => { itemsEdited.current = true; setItems(items.filter((_, i) => i !== index)) }}>&times;</button>
                       )}
                     </td>
                   </tr>
@@ -288,7 +316,7 @@ function QuotationForm({ quote }) {
               </tbody>
             </table>
           </div>
-          <button className="btn-ghost mt-2 px-0 text-brand-600" onClick={() => setItems([...items, blankItem()])}>+ Add Item</button>
+          <button className="btn-ghost mt-2 px-0 text-brand-600" onClick={() => { itemsEdited.current = true; setItems([...items, blankItem()]) }}>+ Add Item</button>
 
           <div className="mt-4 pt-4 border-t border-slate-200 flex justify-end">
             <dl className="w-full sm:w-64 space-y-1.5 text-sm">
@@ -379,6 +407,7 @@ export function QuotationDetails() {
             <Badge>{quote.status}</Badge>
           </div>
           <dl className="space-y-2 text-sm">
+            <Row label="For"><ProductChips products={quote.products} /></Row>
             <Row label="Client">{quote.client?.name}</Row>
             <Row label="Site">{quote.site || '--'}</Row>
             <Row label="Quote Date">{shortDate(quote.quoteDate)}</Row>

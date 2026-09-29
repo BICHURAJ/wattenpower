@@ -10,6 +10,7 @@ import Login from './pages/Login'
 import Signup from './pages/Signup'
 import Users from './pages/Users'
 import Messages from './pages/Messages'
+import { SystemDesignList, SystemDesignEditor } from './pages/SystemDesign'
 import Dashboard from './pages/Dashboard'
 import { ClientsList, ClientDetails } from './pages/Clients'
 import LeadCapture, { LeadsList } from './pages/LeadCapture'
@@ -45,6 +46,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             <Route path="grants" element={<GrantsList />} />
             <Route path="grants/:id" element={<GrantSubmission />} />
             <Route path="engineers" element={<Engineers />} />
+            <Route path="system-design" element={<SystemDesignList />} />
+            <Route path="system-design/:id" element={<SystemDesignEditor />} />
             <Route path="compliance" element={<ComplianceHub />} />
             <Route path="documents" element={<DocumentsPage />} />
             <Route path="stock" element={<StockInventory />} />
@@ -52,7 +55,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             <Route path="reports" element={<Reports />} />
             <Route path="users" element={<Users />} />
             <Route path="messages" element={<Messages />} />
-            <Route path="messages/:id" element={<Messages />} />          </Route>
+            <Route path="messages/:id" element={<Messages />} />
+          </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

@@ -15,6 +15,8 @@ export function crudRouter(Model, options = {}) {
     afterUpdate,
     // async (req) => filter applied to every list request, before the query-string filters.
     baseFilter,
+    // async (q) => filter for ?q=, in place of the simple searchFields match.
+    search,
   } = options;
 
   const router = express.Router();
@@ -24,7 +26,10 @@ export function crudRouter(Model, options = {}) {
       const { q, page = 1, limit = 25, sort } = req.query;
       const filter = baseFilter ? { ...(await baseFilter(req)) } : {};
 
-      if (q && searchFields.length) {
+      if (q && search) {
+        const matching = await search(q, req);
+        if (matching) filter.$and = [...(filter.$and || []), matching];
+      } else if (q && searchFields.length) {
         filter.$or = searchFields.map((field) => ({
           [field]: new RegExp(escapeRegex(q), "i"),
         }));

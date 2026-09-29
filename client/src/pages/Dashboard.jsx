@@ -6,6 +6,7 @@ import { useAuth } from '../auth'
 import { Card, StatCard, Badge, Loading, Banner, useFetch } from '../components/ui'
 import { summarise, exportOverviewPdf } from '../reports/overview'
 import InstallationMap, { useInstallationLocations, pinColour, phaseOf, progressOf, LEGEND_COLOURS } from '../components/InstallationMap'
+import { normaliseProducts, productLabel, PRODUCT_STYLE } from '../processes'
 
 const ICONS = {
   clients: 'M16 21v-2a4 4 0 0 0-8 0v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z',
@@ -214,6 +215,7 @@ export default function Dashboard() {
   const { data: engineerData } = useFetch('/engineers' + qs({ limit: 200 }))
   const { data: installData } = useFetch('/installations' + qs({ limit: 200 }))
   const [mapFilter, setMapFilter] = useState('Active')
+  const [mapProduct, setMapProduct] = useState('All') // or 'ev' / 'solar' / 'battery'
   const { user, can } = useAuth()
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState('')
@@ -233,7 +235,8 @@ export default function Dashboard() {
     Completed: (i) => i.status === 'Completed',
     All: () => true,
   }
-  const mapInstalls = allInstalls.filter(MAP_FILTERS[mapFilter])
+  const hasProduct = (i) => mapProduct === 'All' || normaliseProducts(i.products).includes(mapProduct)
+  const mapInstalls = allInstalls.filter(MAP_FILTERS[mapFilter]).filter(hasProduct)
   const availabilityDays = buildAvailability(engineers)
   const inToday = availabilityDays[0].available
   const offToday = availabilityDays[0].unavailable
@@ -259,7 +262,7 @@ export default function Dashboard() {
       return { lat, lng, count: items.length, colour: pinColour(lead) }
     })
     const legend = Object.entries(LEGEND_COLOURS).filter(([label]) => shown.has(label))
-    return { points, filter: mapFilter, unplaced, legend }
+    return { points, filter: mapFilter + (mapProduct === 'All' ? '' : ' ' + productLabel(mapProduct)), unplaced, legend }
   }
 
   const exportPdf = async () => {
@@ -336,7 +339,19 @@ export default function Dashboard() {
                   onClick={() => setMapFilter(f)}
                   className={'px-2.5 py-1 text-xs font-medium rounded-md transition-colors ' + (mapFilter === f ? 'bg-white text-brand-700 shadow-sm' : 'text-slate-500 hover:text-slate-700')}
                 >
-                  {f} <span className="text-slate-400">{allInstalls.filter(MAP_FILTERS[f]).length}</span>
+                  {f} <span className="text-slate-400">{allInstalls.filter(hasProduct).filter(MAP_FILTERS[f]).length}</span>
+                </button>
+              ))}
+            </div>
+            <div className="inline-flex flex-wrap p-0.5 rounded-lg bg-slate-100" role="group" aria-label="Product">
+              {['All', 'ev', 'solar', 'battery'].map((p) => (
+                <button
+                  key={p}
+                  onClick={() => setMapProduct(p)}
+                  title={p === 'All' ? 'All products' : productLabel(p)}
+                  className={'px-2.5 py-1 text-xs font-medium rounded-md transition-colors ' + (mapProduct === p ? 'bg-white text-brand-700 shadow-sm' : 'text-slate-500 hover:text-slate-700')}
+                >
+                  {p === 'All' ? 'All' : <><span aria-hidden="true">{PRODUCT_STYLE[p]?.icon}</span> {productLabel(p).split(' ')[0]}</>}
                 </button>
               ))}
             </div>

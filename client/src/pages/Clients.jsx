@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, qs, money, shortDate } from '../api'
 import {
@@ -44,12 +44,18 @@ async function confirmAndDelete(client) {
 // Screen 3: Clients
 export function ClientsList() {
   const [search, setSearch] = useState('')
+  // Searched a moment after typing stops, not on every key.
+  const [query, setQuery] = useState('')
+  useEffect(() => {
+    const timer = setTimeout(() => setQuery(search.trim()), 300)
+    return () => clearTimeout(timer)
+  }, [search])
   const [status, setStatus] = useState('All')
   const [page, setPage] = useState(1)
   const [showAdd, setShowAdd] = useState(false)
   const navigate = useNavigate()
 
-  const { data, loading, error, reload } = useFetch('/clients' + qs({ q: search, status, page }))
+  const { data, loading, error, reload } = useFetch('/clients' + qs({ q: query, status, page }))
   const [deletingId, setDeletingId] = useState(null)
   const [actionError, setActionError] = useState('')
   const [notice, setNotice] = useState('')
@@ -112,7 +118,7 @@ export function ClientsList() {
 
       <Card bodyClass="">
         <div className="flex flex-wrap gap-2 p-4 border-b border-slate-200">
-          <SearchInput value={search} onChange={(v) => { setSearch(v); setPage(1) }} placeholder="Search clients..." />
+          <SearchInput value={search} onChange={(v) => { setSearch(v); setPage(1) }} placeholder="Search name, contact, address, postcode, phone, email, EV, solar, battery..." />
           <Select value={status} onChange={(v) => { setStatus(v); setPage(1) }} options={['All', 'Active', 'Inactive']} />
         </div>
         {loading ? <Loading /> : (

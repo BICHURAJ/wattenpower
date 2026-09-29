@@ -5,6 +5,7 @@ import morgan from 'morgan'
 import apiRoutes from './routes/index.js'
 import Lead from './models/Lead.js'
 import Activity from './models/Activity.js'
+import { normaliseProducts, processesForClient } from './processes.js'
 
 /**
  * The Express app, without connecting to the database or listening, so tests
@@ -30,11 +31,23 @@ export function createApp(config) {
 
   app.get('/api/health', (req, res) => res.json({ ok: true, service: 'watten-power-api' }))
 
+  // Products and their process steps (processes.js). Public: the website enquiry
+  // form needs the product list, and it's configuration, not data.
+  app.get('/api/public/processes', (req, res) => res.json(processesForClient()))
+
   // The website lead form is public -- a prospective customer is not signed in.
   // This is the "Website (Lead Capture)" node on the workflow diagram.
   app.post('/api/public/leads', async (req, res, next) => {
     try {
-      const lead = await Lead.create({ ...req.body, source: req.body.source || 'Website' })
+      // Only the form's own fields -- a visitor can't set status, source or links to clients.
+      const b = req.body || {}
+      const lead = await Lead.create({
+        fullName: b.fullName, email: b.email, phone: b.phone,
+        address: b.address, postcode: b.postcode, location: b.location,
+        leadType: b.leadType, preferredContactMethod: b.preferredContactMethod, message: b.message,
+        products: normaliseProducts(b.products, { allowEmpty: true }),
+        source: 'Website',
+      })
       await Activity.create({ type: 'lead', text: 'New website enquiry from ' + lead.fullName, refId: lead._id })
       res.status(201).json({ ok: true, id: lead._id })
     } catch (err) { next(err) }

@@ -1,4 +1,5 @@
 import mongoose from 'mongoose'
+import { PRODUCT_KEYS } from '../processes.js'
 
 const ItemSchema = new mongoose.Schema({
   description: { type: String, required: true },
@@ -22,6 +23,8 @@ const QuotationSchema = new mongoose.Schema({
   quoteDate: { type: Date, default: Date.now },
   validUntil: Date,
   reference: String,
+  // What's being quoted: any mix of EV charger, solar PV and battery (see processes.js).
+  products: { type: [{ type: String, enum: PRODUCT_KEYS }], default: ['ev'] },
   items: [ItemSchema],
   subtotal: { type: Number, default: 0 },
   vatTotal: { type: Number, default: 0 },

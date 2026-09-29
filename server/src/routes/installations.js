@@ -8,11 +8,13 @@ import Activity from '../models/Activity.js'
 import { crudRouter } from '../middleware/crud.js'
 import { syncInstallation } from '../quoteProgress.js'
 import { userCan } from '../permissions.js'
+import { stepDone } from '../processes.js'
+import { installationSearch } from '../installationSearch.js'
 
 const router = express.Router()
 
 // "Project Compliance Hub -- DNO Notification": tell the local electricity
-// network operator that a charger has been added to the supply.
+// network operator about the new equipment on the supply.
 router.post('/:id/dno-notify', async (req, res, next) => {
   try {
     const install = await Installation.findById(req.params.id)
@@ -44,8 +46,14 @@ function requireProgressRight(req, res, next) {
 const guardProgressFields = (req, res, next) =>
   (PROGRESS_FIELDS.some((field) => field in (req.body || {})) ? requireProgressRight(req, res, next) : next())
 
-router.post('/', guardProgressFields)
-router.put('/:id', guardProgressFields)
+// The solar/battery system design is the engineer's MCS work (systemDesign right).
+const guardDesign = (req, res, next) =>
+  (!('design' in (req.body || {})) || userCan(req.user, 'systemDesign', 'update')
+    ? next()
+    : res.status(403).json({ error: 'Only engineers can change the system design.' }))
+
+router.post('/', guardProgressFields, guardDesign)
+router.put('/:id', guardProgressFields, guardDesign)
 
 router.post('/:id/hold', requireProgressRight, async (req, res, next) => {
   try {
@@ -78,7 +86,7 @@ router.post('/:id/resume', requireProgressRight, async (req, res, next) => {
 
     // Jobs put on hold from the edit form have no saved status, so work one out.
     install.status = install.hold?.previousStatus ||
-      (install.progress?.installationInProgress ? 'In Progress' : 'Scheduled')
+      (stepDone(install.progress, 'installationInProgress') ? 'In Progress' : 'Scheduled')
     install.hold = undefined
     await install.save()
     await Activity.create({
@@ -114,8 +122,9 @@ router.post('/:id/certification', requireProgressRight, async (req, res, next) =
     await cert.save()
 
     if (cert.complete) {
-      install.progress.testingCertification = true
-      install.progress.handover = true
+      // Every product's process has these two steps (see processes.js).
+      install.progress.set('testingCertification', true)
+      install.progress.set('handover', true)
       install.status = 'Completed'
       await install.save()
       await Activity.create({
@@ -168,6 +177,32 @@ const POPULATE = [
 
 // Installation Details. The "Quotation Accepted" step follows the quotation
 // linked to the job (populated as `quotation`); with none linked it stays unticked.
+// System Design page: the solar / battery jobs engineers design (MCS).
+// ?state=needs (design step not ticked) | done | all. Cancelled jobs and
+// inactive clients are left out.
+router.get('/designs', async (req, res, next) => {
+  try {
+    if (!userCan(req.user, 'systemDesign', 'read')) {
+      return res.status(403).json({ error: 'Only engineers can see the system design queue.' })
+    }
+    const base = { ...(await Client.activeOnly()), products: { $in: ['solar', 'battery'] }, status: { $ne: 'Cancelled' } }
+    const needs = { ...base, 'progress.systemDesigned': { $ne: true } }
+    const done = { ...base, 'progress.systemDesigned': true }
+    const filter = req.query.state === 'needs' ? needs : req.query.state === 'done' ? done : base
+    const [items, needsCount, doneCount] = await Promise.all([
+      Installation.find(filter)
+        .sort({ installDate: 1, createdAt: 1 })
+        .limit(500)
+        .populate('client', 'name address postcode')
+        .populate('engineer', 'name')
+        .lean(),
+      Installation.countDocuments(needs),
+      Installation.countDocuments(done),
+    ])
+    res.json({ items, counts: { needs: needsCount, done: doneCount, all: needsCount + doneCount } })
+  } catch (err) { next(err) }
+})
+
 router.get('/:id', async (req, res, next) => {
   try {
     let query = Installation.findById(req.params.id)
@@ -183,7 +218,9 @@ router.get('/:id', async (req, res, next) => {
 })
 
 router.use('/', crudRouter(Installation, {
-  searchFields: ['installNo', 'site', 'chargerModel'],
+  // Every word must match the job, its client, engineer, quote or products (installationSearch.js).
+  search: installationSearch,
+  filterFields: ['status', 'products'], // ?products=solar
   populate: POPULATE,
   defaultSort: '-installDate',
   // Jobs of Inactive clients are hidden, unless a client is asked for by ?client=.

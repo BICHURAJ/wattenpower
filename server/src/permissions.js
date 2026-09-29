@@ -11,6 +11,8 @@
 // - installationProgress: moving a job along -- progress steps, tasks, status,
 //   hold/resume and completing the certificate. Engineers (and admins) only.
 // - allActivity: seeing everyone's recent activity. Others see only their own.
+// - systemDesign: the solar/battery system design on a job (MCS) and the System
+//   Design page (read = see it, update = design). Engineers and admins.
 
 export const ROLES = ['admin', 'finance', 'sales', 'engineer']
 
@@ -32,7 +34,7 @@ export const PERMISSIONS = {
   admin: {
     dashboard: R, clients: ALL, leads: ALL, quotations: ALL, installations: ALL, tickets: ALL, grants: ALL,
     engineers: ALL, compliance: ALL, documents: ALL, stock: ALL, vans: ALL, tools: ALL, activities: R, users: ALL,
-    quoteValues: R, installationProgress: ['update'], allActivity: R,
+    quoteValues: R, installationProgress: ['update'], allActivity: R, systemDesign: RU,
   },
   // Money: grant claims, quote values and payment terms, stock costs.
   finance: {
@@ -49,7 +51,7 @@ export const PERMISSIONS = {
   engineer: {
     dashboard: R, clients: R, installations: RU, tickets: RCU,
     engineers: R, compliance: RU, documents: R, stock: RU, vans: RU, tools: RU, activities: R,
-    installationProgress: ['update'],
+    installationProgress: ['update'], systemDesign: RU,
   },
 }
 

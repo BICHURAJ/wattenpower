@@ -1,5 +1,7 @@
 import mongoose from 'mongoose'
 import { LocationSchema } from './Client.js'
+import { SystemDesignSchema } from './SystemDesign.js'
+import { PRODUCT_KEYS, HAND_STEP_KEYS, stepDone } from '../processes.js'
 
 const TaskSchema = new mongoose.Schema({
   title: String,
@@ -19,6 +21,11 @@ const InstallationSchema = new mongoose.Schema({
     default: 'Scheduled',
   },
   engineer: { type: mongoose.Schema.Types.ObjectId, ref: 'Engineer' },
+  // What's being installed: any mix of EV charger, solar PV and battery (see processes.js).
+  products: { type: [{ type: String, enum: PRODUCT_KEYS }], default: ['ev'] },
+  // Solar / battery system, copied from the quotation and then kept as-built.
+  design: SystemDesignSchema,
+  // EV charger details
   chargerModel: String,
   supplyType: { type: String, enum: ['Single Phase', 'Three Phase'], default: 'Single Phase' },
   // Where the job is. Defaults to the client's address but can differ (another site, a tenant...).
@@ -28,14 +35,9 @@ const InstallationSchema = new mongoose.Schema({
   // Where on the property the charger goes, e.g. "Garage - Right Wall".
   location: String,
   accessNotes: String,
-  // The five stages shown on the Installation Details progress panel.
-  progress: {
-    siteSurveyCompleted: { type: Boolean, default: false },
-    quotationAccepted: { type: Boolean, default: false },
-    installationInProgress: { type: Boolean, default: false },
-    testingCertification: { type: Boolean, default: false },
-    handover: { type: Boolean, default: false },
-  },
+  // Progress: step key -> done. Which steps a job has depends on its products
+  // (stepsFor in processes.js); a missing step counts as not done.
+  progress: { type: Map, of: Boolean, default: () => ({}) },
   // "Project Compliance Hub -- DNO Notification" node on the workflow.
   dnoNotified: { type: Boolean, default: false },
   dnoNotifiedAt: Date,
@@ -53,17 +55,16 @@ const InstallationSchema = new mongoose.Schema({
 
 // A completed site survey is final: once ticked it cannot be unticked.
 InstallationSchema.pre('validate', function (next) {
-  if (!this.isNew && this.isModified('progress.siteSurveyCompleted') && !this.progress?.siteSurveyCompleted) {
+  if (!this.isNew && this.isModified('progress.siteSurveyCompleted') && !stepDone(this.progress, 'siteSurveyCompleted')) {
     this.invalidate('progress.siteSurveyCompleted', 'The site survey is already completed and cannot be undone.')
   }
   next()
 })
 
 // Progress is frozen while a job is on hold.
-const HAND_STEPS = ['siteSurveyCompleted', 'installationInProgress', 'testingCertification', 'handover']
 InstallationSchema.pre('validate', function (next) {
   if (!this.isNew && this.status === 'On Hold' && !this.isModified('status') &&
-      HAND_STEPS.some((step) => this.isModified('progress.' + step))) {
+      HAND_STEP_KEYS.some((step) => this.isModified('progress.' + step))) {
     this.invalidate('progress', 'This job is on hold. Resume it before changing its progress.')
   }
   // Moved off hold some other way (e.g. the edit form): the hold details no longer apply.
@@ -100,5 +101,7 @@ InstallationSchema.pre('save', async function (next) {
   }
   next()
 })
+
+InstallationSchema.index({ products: 1 })
 
 export default mongoose.model('Installation', InstallationSchema)

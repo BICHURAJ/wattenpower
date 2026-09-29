@@ -1,5 +1,6 @@
 import { money, shortDate, lineAmounts, quoteTotals } from '../api'
 import { BRAND, BRAND_DARK, loadLogo, drawBrandHeader } from './brand'
+import { normaliseProducts, productLabel } from '../processes'
 
 // Company details printed on every quotation. Fill these in -- any left blank
 // are simply left off the PDF rather than printed as placeholders.
@@ -85,6 +86,7 @@ export async function exportQuotationPdf(quote) {
     ['Quote date', shortDate(quote.quoteDate)],
     ['Valid until', shortDate(quote.validUntil)],
     ['Reference', quote.reference || '--'],
+    ['For', normaliseProducts(quote.products).map(productLabel).join(' + ')],
     ['Site', quote.site || '--'],
     ['Payment', quote.financeOption && quote.financeOption !== 'None' ? quote.financeOption : '--'],
   ]

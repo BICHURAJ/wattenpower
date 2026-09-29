@@ -9,6 +9,7 @@ import Installation from './models/Installation.js'
 import Certification from './models/Certification.js'
 import Ticket from './models/Ticket.js'
 import Grant from './models/Grant.js'
+import { stepsFor } from './processes.js'
 
 // Adds a realistic batch of mock data on top of what is already there:
 // 5 engineers (one per region), 42 clients, and 50 installations, each with
@@ -154,19 +155,101 @@ function quoteItems(commercial) {
   return { charger, items }
 }
 
-// Progress that matches each job status.
-function jobProgress(status, quoteAccepted) {
+// --- Solar PV and batteries ------------------------------------------------------------
+// Most homes still want a charger; a good share now want solar, often with a battery.
+const DOMESTIC_MIX = [['ev'], ['ev'], ['ev'], ['solar'], ['solar', 'battery'], ['solar', 'battery'], ['solar', 'battery', 'ev'], ['battery']]
+const COMMERCIAL_MIX = [['ev'], ['ev'], ['solar'], ['solar', 'ev']]
+const PANELS = [
+  { make: 'Aiko', model: 'Neostar 2P 450W', watts: 450 },
+  { make: 'JA Solar', model: 'JAM54D40 435W', watts: 435 },
+  { make: 'Longi', model: 'Hi-MO 6 430W', watts: 430 },
+  { make: 'REC', model: 'Alpha Pure-R 410W', watts: 410 },
+]
+const INVERTERS = [
+  { make: 'SolarEdge', model: 'SE3680H', kw: 3.68 },
+  { make: 'GivEnergy', model: 'Gen 3 Hybrid 5.0', kw: 5 },
+  { make: 'Fox ESS', model: 'H1-5.0-E', kw: 5 },
+  { make: 'SolarEdge', model: 'SE10K', kw: 10 },
+]
+const BATTERIES = [
+  { make: 'GivEnergy', model: 'Giv-Bat 9.5', kwh: 9.5 },
+  { make: 'Tesla', model: 'Powerwall 3', kwh: 13.5 },
+  { make: 'Fox ESS', model: 'EP5', kwh: 5.2 },
+]
+const ROOF_FACING = ['S', 'S', 'SE', 'SW', 'E', 'W']
+
+/** A realistic system design for the chosen products. */
+function systemDesign(products, commercial) {
+  const design = {}
+  if (products.includes('solar')) {
+    const panel = pick(PANELS)
+    const count = commercial ? between(24, 80) : between(8, 16)
+    const facing = pick(ROOF_FACING)
+    // Roughly what the MCS tables give for a pitched roof in England (kWh/kWp).
+    const kk = { S: 950, SE: 900, SW: 900, E: 780, W: 780 }[facing] + between(-40, 40)
+    Object.assign(design, {
+      panelMake: panel.make, panelModel: panel.model, panelCount: count, panelWatts: panel.watts,
+      orientation: facing, pitch: commercial ? between(5, 15) : between(30, 45),
+      mounting: commercial ? 'Flat roof' : pick(['On-roof', 'On-roof', 'In-roof']),
+      mcsZone: pick(['2', '3', '4', '5E', '5W', '6', '7E', '8E']),
+      kk,
+      shadingFactor: pick([1, 1, 1, 0.95, 0.9, 0.85]),
+    })
+    const inverter = commercial ? INVERTERS[3] : pick(INVERTERS.slice(0, 3))
+    Object.assign(design, { inverterMake: inverter.make, inverterModel: inverter.model, inverterKw: inverter.kw })
+  }
+  if (products.includes('battery')) {
+    const battery = pick(BATTERIES)
+    Object.assign(design, { batteryMake: battery.make, batteryModel: battery.model, batteryKwh: battery.kwh })
+    if (!design.inverterMake) Object.assign(design, { inverterMake: 'GivEnergy', inverterModel: 'AC Coupled 3.0', inverterKw: 3 })
+  }
+  return design
+}
+
+/** Quote lines for solar / battery. Residential solar and batteries are 0% VAT (to March 2027). */
+function solarItems(products, design, commercial) {
+  const vat = commercial ? 20 : 0
+  const items = []
+  if (products.includes('solar')) {
+    items.push({ description: design.panelCount + ' x ' + design.panelMake + ' ' + design.panelModel + ' panels', qty: 1, unitPrice: design.panelCount * between(95, 130), vat })
+    items.push({ description: design.inverterMake + ' ' + design.inverterModel + ' inverter', qty: 1, unitPrice: Math.round(design.inverterKw * 180), vat })
+    items.push({ description: 'Mounting, cabling, isolators & installation', qty: 1, unitPrice: commercial ? 4200 : between(1800, 2600), vat })
+    items.push({ description: 'Scaffolding', qty: 1, unitPrice: commercial ? 1500 : between(550, 900), vat })
+  }
+  if (products.includes('battery')) {
+    items.push({ description: design.batteryMake + ' ' + design.batteryModel + ' battery (' + design.batteryKwh + ' kWh)', qty: 1, unitPrice: Math.round(design.batteryKwh * between(420, 520)), vat })
+  }
+  items.push({ description: 'MCS certification & DNO application', qty: 1, unitPrice: 250, vat })
+  return items
+}
+
+const SOLAR_TASKS = ['Erect scaffolding', 'Fit roof mounting rails', 'Mount panels and run strings', 'Install inverter and isolators', 'Test, commission and label', 'Customer handover & app setup']
+
+/** Ticks this job's steps up to (and including) `lastKey`, in process order. */
+function progressThrough(products, lastKey, extra = {}) {
+  const progress = {}
+  for (const step of stepsFor(products)) {
+    progress[step.key] = true
+    if (step.key === lastKey) break
+  }
+  return { ...progress, ...extra }
+}
+
+// Progress that matches each job status, for the job's own steps.
+function productProgress(products, status, quoteAccepted) {
   switch (status) {
     case 'Completed':
-      return { siteSurveyCompleted: true, quotationAccepted: true, installationInProgress: true, testingCertification: true, handover: true }
+      return progressThrough(products, 'handover')
     case 'In Progress':
-      return { siteSurveyCompleted: true, quotationAccepted: true, installationInProgress: true, testingCertification: chance(0.4), handover: false }
+      return progressThrough(products, chance(0.5) ? 'installationInProgress' : 'testingCertification')
     case 'On Hold':
-      return { siteSurveyCompleted: true, quotationAccepted: true, installationInProgress: chance(0.5) }
+      return progressThrough(products, products.includes('solar') ? 'dnoApplication' : 'quotationAccepted')
     case 'Cancelled':
       return { siteSurveyCompleted: true, quotationAccepted: false }
-    default: // Scheduled
-      return { siteSurveyCompleted: quoteAccepted || chance(0.5), quotationAccepted: quoteAccepted }
+    default: { // Scheduled
+      const surveyed = quoteAccepted || chance(0.5)
+      return { siteSurveyCompleted: surveyed, systemDesigned: surveyed && products.some((p) => p !== 'ev'), quotationAccepted: quoteAccepted }
+    }
   }
 }
 
@@ -262,7 +345,12 @@ async function createMock() {
 
     // Scheduled jobs are sometimes still waiting on the customer to accept.
     const quoteStatus = status === 'Cancelled' ? 'Declined' : status === 'Scheduled' && chance(0.3) ? 'Sent' : 'Accepted'
-    const { charger, items } = quoteItems(commercial)
+    const products = pick(commercial ? COMMERCIAL_MIX : DOMESTIC_MIX)
+    const hasEv = products.includes('ev')
+    const design = products.some((p) => p !== 'ev') ? systemDesign(products, commercial) : undefined
+    const ev = hasEv ? quoteItems(commercial) : { charger: null, items: [] }
+    const charger = ev.charger
+    const items = [...ev.items, ...(design ? solarItems(products, design, commercial) : [])]
     const history = [
       { action: 'Quotation created', by: 'David Parker', at: quoteDate },
       { action: 'Quotation sent to client', by: 'David Parker', at: new Date(quoteDate.getTime() + 864e5) },
@@ -278,15 +366,17 @@ async function createMock() {
       validUntil,
       reference: 'WP-' + quoteDate.getFullYear() + '-' + between(10000, 99999),
       items,
+      products,
       status: quoteStatus,
-      financeOption: pick(commercial ? ['Pay in Full', 'Finance Plan'] : ['Pay in Full', 'Pay in Full', 'Finance Plan', 'OLEV Grant Funded']),
+      financeOption: pick(commercial || !hasEv ? ['Pay in Full', 'Pay in Full', 'Finance Plan'] : ['Pay in Full', 'Pay in Full', 'Finance Plan', 'OLEV Grant Funded']),
       history,
     })
 
-    const progress = jobProgress(status, quoteStatus === 'Accepted')
+    const progress = productProgress(products, status, quoteStatus === 'Accepted')
+    const taskList = products.includes('solar') ? SOLAR_TASKS : TASKS
     const tasks = status === 'In Progress'
-      ? TASKS.map((title, i) => ({ title, done: i < between(1, 3) }))
-      : status === 'Completed' ? TASKS.map((title) => ({ title, done: true })) : []
+      ? taskList.map((title, i) => ({ title, done: i < between(1, 3) }))
+      : status === 'Completed' ? taskList.map((title) => ({ title, done: true })) : []
 
     const install = await Installation.create({
       client: client._id,
@@ -295,12 +385,14 @@ async function createMock() {
       installDate,
       status,
       engineer: status === 'Scheduled' && chance(0.15) ? undefined : place.region.engineerDoc._id,
-      chargerModel: charger.model,
+      products,
+      design,
+      chargerModel: charger?.model,
       supplyType: commercial ? 'Three Phase' : chance(0.1) ? 'Three Phase' : 'Single Phase',
       address: site ? site.address : place.address,
       postcode: place.postcode,
       coordinates: place.location,
-      location: commercial ? pick(['Staff car park - bays 1-2', 'Visitor parking', 'Loading bay wall', 'Rear car park']) : pick(FIT_POINTS),
+      location: !hasEv ? undefined : commercial ? pick(['Staff car park - bays 1-2', 'Visitor parking', 'Loading bay wall', 'Rear car park']) : pick(FIT_POINTS),
       accessNotes: commercial ? pick(['Sign in at reception', 'Site induction required', 'Access via rear gate']) : pick(ACCESS),
       progress,
       tasks,

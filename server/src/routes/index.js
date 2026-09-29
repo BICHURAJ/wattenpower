@@ -24,6 +24,7 @@ import Tool from '../models/Tool.js'
 import Activity from '../models/Activity.js'
 import Installation from '../models/Installation.js'
 import Quotation from '../models/Quotation.js'
+import { clientSearch } from '../installationSearch.js'
 
 const router = express.Router()
 
@@ -41,6 +42,7 @@ for (const resource of RESOURCES) router.use('/' + resource, authorize(resource)
 router.use('/users', userRoutes)
 // Messages between users: open to every signed-in user, so not an area in permissions.js.
 router.use('/messages', messageRoutes)
+
 router.use('/dashboard', dashboardRoutes)
 router.use('/quotations', quotationRoutes)
 router.use('/installations', installationRoutes)
@@ -77,7 +79,8 @@ router.delete('/clients/:id', async (req, res, next) => {
 })
 
 router.use('/clients', crudRouter(Client, {
-  searchFields: ['name', 'contactPerson', 'email', 'phone'],
+  // Every word must match the client's details, products, jobs or quotes (installationSearch.js).
+  search: clientSearch,
   defaultSort: 'name',
   afterCreate: async (doc) => {
     await Activity.create({ type: 'client', text: 'New client added: ' + doc.name, refId: doc._id })
@@ -88,7 +91,7 @@ router.use('/clients', crudRouter(Client, {
 // the auth wall for staff, and separately as a public route in index.js.
 router.use('/leads', crudRouter(Lead, {
   searchFields: ['fullName', 'email', 'phone', 'postcode'],
-  filterFields: ['status', 'leadType'],
+  filterFields: ['status', 'leadType', 'products'],
 }))
 
 // Turn a website enquiry into a real client record.

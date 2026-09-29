@@ -84,6 +84,9 @@ export function ComplianceHub() {
 }
 
 // Screen 15: Stock & Inventory
+// Same list as the server (models/StockItem.js).
+const STOCK_CATEGORIES = ['Chargers', 'Solar Panels', 'Inverters', 'Batteries', 'Mounting', 'Accessories', 'Electrical', 'Consumables']
+
 export function StockInventory() {
   const [search, setSearch] = useState('')
   const [category, setCategory] = useState('All')
@@ -139,7 +142,7 @@ export function StockInventory() {
       <Card bodyClass="">
         <div className="flex flex-wrap gap-2 p-4 border-b border-slate-200">
           <SearchInput value={search} onChange={(v) => { setSearch(v); setPage(1) }} placeholder="Search items..." />
-          <Select value={category} onChange={setCategory} options={['All', 'Chargers', 'Accessories', 'Electrical', 'Consumables']} />
+          <Select value={category} onChange={setCategory} options={['All', ...STOCK_CATEGORIES]} />
         </div>
         {loading ? <Loading /> : (
           <>
@@ -177,7 +180,7 @@ function AddStockModal({ open, onClose, onSaved }) {
         <div className="grid sm:grid-cols-2 gap-4">
           <Field label="Category">
             <select className="input" value={form.category} onChange={set('category')}>
-              <option>Chargers</option><option>Accessories</option><option>Electrical</option><option>Consumables</option>
+              {STOCK_CATEGORIES.map((c) => <option key={c}>{c}</option>)}
             </select>
           </Field>
           <Field label="Supplier"><input className="input" value={form.supplier} onChange={set('supplier')} /></Field>

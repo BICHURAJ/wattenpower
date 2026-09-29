@@ -1,0 +1,342 @@
+===============================================================================
+ WATTEN POWER - DEPLOYING TO AWS EC2 WITH DOCKER (+ CloudFront HTTPS)
+===============================================================================
+ Runbook for putting the app on an EC2 server and keeping it updated.
+ NO SECRETS IN THIS FILE. Passwords and keys live only in docker.env on the
+ server (git-ignored). Never paste them into chat, email or the repo.
+
+
+-------------------------------------------------------------------------------
+ 0. HOW IT FITS TOGETHER
+-------------------------------------------------------------------------------
+
+   Browser --HTTPS--> CloudFront (https://d3cn5j72zptsy8.cloudfront.net)
+                          |
+                          |  HTTP, port 80
+                          v
+                     EC2 server (Ubuntu + Docker)
+                       caddy  : port 80, forwards to web
+                       web    : nginx + built React app, forwards /api to api
+                       api    : Node/Express
+                          |
+                          v
+                     MongoDB Atlas  (cluster wattenpower0, database "wattenpower")
+
+ Current values (not secret):
+   AWS region ............ eu-north-1 (Stockholm)
+   EC2 public IP ......... 13.60.214.86
+   EC2 public DNS ........ ec2-13-60-214-86.eu-north-1.compute.amazonaws.com
+   CloudFront ............ https://d3cn5j72zptsy8.cloudfront.net
+   Atlas cluster host .... wattenpower0.kzyqoht.mongodb.net
+   GitHub repo (private) . git@github.com:BICHURAJ/wattenpower.git
+
+ All commands below are run ON THE EC2 SERVER unless it says "on your PC".
+
+
+-------------------------------------------------------------------------------
+ 1. EC2 INSTANCE (one-time, AWS console)
+-------------------------------------------------------------------------------
+
+ - Image: Ubuntu Server 24.04 LTS
+ - Type: t3.small (2 GB RAM) recommended. t2/t3.micro (1 GB) works only with
+   swap and is slow to build.
+ - Disk: 20 GB (the default 8 GB fills up - see section 12).
+ - Key pair: keep the .pem file safe.
+ - Elastic IP: EC2 -> Elastic IPs -> Allocate -> Associate with the instance,
+   so the address never changes when the instance restarts.
+
+ Security group (inbound rules):
+   SSH   22  -> My IP only
+   HTTP  80  -> prefix list  com.amazonaws.global.cloudfront.origin-facing
+                (only CloudFront can reach the server)
+   Nothing else. Never open 4000 or 27017.
+
+ Atlas -> Network Access: add the EC2 Elastic IP.
+
+
+-------------------------------------------------------------------------------
+ 2. CONNECT (on your PC, PowerShell)
+-------------------------------------------------------------------------------
+
+   ssh -i "C:\path\to\your-key.pem" ubuntu@13.60.214.86
+
+ If Windows says the key is "too open", run once:
+   icacls "C:\path\to\your-key.pem" /inheritance:r /grant:r "$($env:USERNAME):R"
+
+
+-------------------------------------------------------------------------------
+ 3. INSTALL DOCKER (one-time)
+-------------------------------------------------------------------------------
+
+   curl -fsSL https://get.docker.com | sudo sh
+   sudo usermod -aG docker ubuntu
+   exit                      # log in again so "docker" works without sudo
+
+ Check:
+   docker --version
+   docker compose version
+   sudo systemctl is-enabled docker     # enabled = starts after reboot
+
+
+-------------------------------------------------------------------------------
+ 4. SWAP (one-time, needed on 1 GB servers so the build isn't killed)
+-------------------------------------------------------------------------------
+
+   sudo fallocate -l 2G /swapfile
+   sudo chmod 600 /swapfile
+   sudo mkswap /swapfile
+   sudo swapon /swapfile
+   echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+   free -h                   # "Swap:" line should show 2.0Gi
+
+ (Use 4G only if the disk is 20 GB or more - swap takes disk space.)
+
+
+-------------------------------------------------------------------------------
+ 5. ACCESS THE PRIVATE GITHUB REPO (one-time, read-only deploy key)
+-------------------------------------------------------------------------------
+
+   ssh-keygen -t ed25519 -C "ec2-wattenpower-deploy" -f ~/.ssh/github_deploy -N ""
+   cat ~/.ssh/github_deploy.pub          # copy this line
+
+ GitHub -> repo BICHURAJ/wattenpower -> Settings -> Deploy keys -> Add deploy key
+   Title: EC2 server, Key: the line above, "Allow write access": UNTICKED
+
+   cat >> ~/.ssh/config <<'EOF'
+   Host github.com
+     IdentityFile ~/.ssh/github_deploy
+     IdentitiesOnly yes
+   EOF
+   chmod 600 ~/.ssh/config
+   ssh -T git@github.com                 # type "yes" the first time
+
+   git clone git@github.com:BICHURAJ/wattenpower.git ~/wattenpower
+
+
+-------------------------------------------------------------------------------
+ 6. SERVER-ONLY FILES (not in git - create once, keep a backup)
+-------------------------------------------------------------------------------
+
+ cd ~/wattenpower
+
+ 6a) docker.env  (SECRETS - never commit, never share)
+   cp docker.env.example docker.env
+   openssl rand -hex 32                  # copy the output = JWT_SECRET
+   nano docker.env
+
+   MONGODB_URI=mongodb+srv://wattenpower:<ATLAS_PASSWORD>@wattenpower0.kzyqoht.mongodb.net/wattenpower?appName=Wattenpower0
+   JWT_SECRET=<output of openssl rand -hex 32>
+   CORS_ALLOWED_ORIGINS=https://d3cn5j72zptsy8.cloudfront.net
+
+   Notes:
+   - Keep "/wattenpower" (the database name) before the "?".
+   - Special characters in the password must be URL-encoded:
+       @ -> %40   : -> %3A   / -> %2F   ? -> %3F   # -> %23   % -> %25
+   - Changing JWT_SECRET signs everyone out (they just log in again).
+
+ 6b) Caddyfile  (plain HTTP on port 80; CloudFront provides HTTPS)
+   cat > Caddyfile <<'EOF'
+   :80 {
+       encode gzip
+       reverse_proxy web:80 {
+           flush_interval -1
+       }
+   }
+   EOF
+
+ 6c) docker-compose.prod.yml
+   cat > docker-compose.prod.yml <<'EOF'
+   services:
+     api:
+       environment:
+         TRUST_PROXY: "3"        # CloudFront -> Caddy -> nginx = 3 proxies
+     web:
+       ports: !reset []          # not published; Caddy fronts it
+     caddy:
+       image: caddy:2-alpine
+       ports: ["80:80"]
+       volumes:
+         - ./Caddyfile:/etc/caddy/Caddyfile:ro
+         - caddy_data:/data
+         - caddy_config:/config
+       depends_on: [web]
+       restart: unless-stopped
+   volumes:
+     caddy_data: {}
+     caddy_config: {}
+   EOF
+
+ Backup these three files (outside the repo folder):
+   cp docker.env Caddyfile docker-compose.prod.yml ~/
+
+
+-------------------------------------------------------------------------------
+ 7. BUILD AND START (first time)
+-------------------------------------------------------------------------------
+
+ Shortcut used everywhere below:
+   alias dc='docker compose -f docker-compose.yml -f docker-compose.prod.yml'
+   (add that line to ~/.bashrc to keep it)
+
+   cd ~/wattenpower
+   dc build api              # build ONE at a time on small servers
+   dc build web              # slow on 1 GB servers (5-10 min) - let it finish
+   dc up -d
+   dc ps
+
+
+-------------------------------------------------------------------------------
+ 8. CHECK IT'S WORKING
+-------------------------------------------------------------------------------
+
+   dc ps                     # api "Up (healthy)", web "Up", caddy "Up"
+   dc logs --tail 5 api      # [db] connected to mongodb+srv://***@wattenpower0...
+   curl -s http://localhost/api/health            # {"ok":true,"service":"watten-power-api"}
+   curl -s http://localhost | grep -o favicon-32.png
+
+ On your PC (PowerShell):
+   curl.exe -s https://d3cn5j72zptsy8.cloudfront.net/api/health
+   curl.exe -s -H "Authorization: Bearer abc.def.ghi" https://d3cn5j72zptsy8.cloudfront.net/api/auth/me
+     -> must say "Session expired, please sign in again"
+        ("Not signed in" = CloudFront is dropping the login header, see 10)
+
+ Then open https://d3cn5j72zptsy8.cloudfront.net in an Incognito window.
+
+
+-------------------------------------------------------------------------------
+ 9. UPDATING AFTER A NEW PUSH TO GITHUB
+-------------------------------------------------------------------------------
+
+   cd ~/wattenpower
+   git pull                                  # or: git fetch origin && git reset --hard origin/main
+   git log --oneline -1                      # confirm the latest commit
+   dc build api
+   dc build web
+   dc up -d --force-recreate web api
+   dc ps                                     # web/api "Created ... seconds ago"
+   docker image prune -f                     # remove old images, frees disk
+
+ IMPORTANT: "dc restart" or "dc up -d" WITHOUT building keeps the OLD code.
+ Always build, then --force-recreate.
+
+ CloudFront normally shows the new version straight away (pages aren't cached).
+ If not: CloudFront -> distribution -> Invalidations -> Create -> /*
+ Browsers keep old tab icons for a long time - check in Incognito.
+
+
+-------------------------------------------------------------------------------
+ 10. CLOUDFRONT SETTINGS (reference)
+-------------------------------------------------------------------------------
+
+ Origin:
+   Origin domain ... ec2-13-60-214-86.eu-north-1.compute.amazonaws.com
+   Protocol ........ HTTP only
+   HTTP port ....... 80
+
+ Behaviours (all: Viewer protocol = Redirect HTTP to HTTPS):
+   Default (*) ... methods GET,HEAD,OPTIONS,PUT,POST,PATCH,DELETE
+                   cache policy CachingDisabled
+                   origin request policy AllViewerExceptHostHeader
+   /api/* ........ same as Default (never cache API, pass login header)
+   /assets/* ..... GET,HEAD, cache policy CachingOptimized (fast static files)
+
+ Own domain later: ACM certificate in us-east-1 -> add as Alternate domain
+ name -> CNAME to the cloudfront.net name -> update CORS_ALLOWED_ORIGINS.
+
+
+-------------------------------------------------------------------------------
+ 11. EVERYDAY COMMANDS
+-------------------------------------------------------------------------------
+
+   dc ps                         status
+   dc logs -f api                live API log (Ctrl+C to stop)
+   dc logs --tail 50 web         nginx log
+   dc restart api                restart API (same code)
+   dc up -d --force-recreate api after editing docker.env
+   dc down                       stop everything (data is safe in Atlas)
+   dc up -d                      start again
+   free -h                       memory / swap
+   df -h /                       disk space
+   docker stats --no-stream      CPU / memory per container
+
+
+-------------------------------------------------------------------------------
+ 12. PROBLEMS WE HIT AND THE FIXES
+-------------------------------------------------------------------------------
+
+ "signal: killed" / "failed to execute bake: signal: killed" during build
+   -> Out of memory. Add swap (section 4), build api and web separately,
+      or use a t3.small.
+
+ "no space left on device"
+   -> Disk full (8 GB default + swap + images). Resize the disk:
+      EC2 -> Instance -> Storage -> Volume -> Actions -> Modify volume -> 20 GB
+      then on the server:
+        lsblk
+        sudo growpart /dev/nvme0n1 1        (or /dev/xvda 1)
+        sudo resize2fs /dev/nvme0n1p1       (or /dev/xvda1)
+        df -h /
+      Clean up:
+        docker system prune -a -f
+        docker builder prune -a -f
+        sudo apt-get clean
+        sudo journalctl --vacuum-size=100M
+
+ CloudFront "504 Gateway Timeout"
+   -> CloudFront can't reach EC2. Check: origin protocol = HTTP only, port 80;
+      security group allows the CloudFront prefix list on port 80;
+      the instance IP hasn't changed (use an Elastic IP).
+
+ Browser "ERR_SSL_PROTOCOL_ERROR" on the IP address
+   -> HTTPS doesn't work on a bare IP. Use the CloudFront https address.
+      Caddyfile must start with ":80 {" (not the IP).
+
+ Site shows old version / old logo
+   -> Containers weren't rebuilt. Run section 9 (build + --force-recreate).
+      "dc ps" shows an image name like "sha256:..." = running an old image.
+
+ API keeps restarting - "dc logs api" shows:
+   bad auth : authentication failed -> wrong Atlas password in docker.env
+   ... timed out                      -> server IP not in Atlas Network Access
+   [config] JWT_SECRET is not set     -> docker.env missing or empty
+   [config] CORS_ALLOWED_ORIGINS ...  -> must be the exact https address, no "/"
+
+ git pull: "Permission denied (publickey)"
+   -> Deploy key missing (section 5).
+
+ git pull: "local changes would be overwritten"
+   -> git stash ; git pull ; git stash pop
+      (or git reset --hard origin/main - docker.env, Caddyfile and
+       docker-compose.prod.yml are safe, they are not in git)
+
+
+-------------------------------------------------------------------------------
+ 13. START COMPLETELY FRESH (wipe Docker on the server)
+-------------------------------------------------------------------------------
+
+   Data is safe - it's in Atlas. Back up the server-only files first:
+   cp ~/wattenpower/docker.env ~/wattenpower/Caddyfile ~/wattenpower/docker-compose.prod.yml ~/
+
+   cd ~/wattenpower && dc down --volumes --remove-orphans
+   docker system prune -a --volumes -f
+   docker builder prune -a -f
+
+   Then section 7 (build and start).
+
+
+-------------------------------------------------------------------------------
+ 14. SECURITY CHECKLIST
+-------------------------------------------------------------------------------
+
+ [ ] SSH (22) allowed from My IP only
+ [ ] Port 80 allowed only from the CloudFront prefix list
+ [ ] Atlas Network Access: only the EC2 Elastic IP (and your office IP)
+ [ ] Strong Atlas password; stored only in docker.env on the server
+ [ ] Demo accounts (david@/sarah@/mike@ with the old demo password) removed
+     or given new passwords BEFORE sharing the site
+ [ ] Never run "npm run seed" against Atlas (it wipes data; it refuses when
+     NODE_ENV=production)
+ [ ] Deploy key is read-only; delete it on GitHub if the server is retired
+ [ ] Keep a copy of docker.env somewhere safe (password manager)
+
+===============================================================================

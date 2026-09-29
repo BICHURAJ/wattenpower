@@ -6,6 +6,7 @@ import {
 } from '../components/ui'
 import { useAuth } from '../auth'
 import LocationPicker from '../components/LocationPicker'
+import { useProcesses, ProductPicker, ProductChips, productLabel } from '../processes'
 
 // Screen 5: Website Lead Capture.
 // This is the "Website (Lead Capture)" node on the workflow -- it posts to a
@@ -13,8 +14,10 @@ import LocationPicker from '../components/LocationPicker'
 export default function LeadCapture() {
   const [form, setForm] = useState({
     fullName: '', email: '', phone: '', address: '', postcode: '', location: null,
-    leadType: 'Installation Enquiry', preferredContactMethod: 'Email', message: '',
+    leadType: 'Installation Enquiry', preferredContactMethod: 'Email', message: '', products: [],
   })
+  // The product list comes from the server; this page is outside the signed-in app.
+  useProcesses()
   const [error, setError] = useState('')
   const [done, setDone] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -63,6 +66,12 @@ export default function LeadCapture() {
                 <Field label="Phone" required>
                   <input className="input" placeholder="Enter phone" value={form.phone} onChange={set('phone')} required />
                 </Field>
+                <div className="sm:col-span-2">
+                  <Field label="What are you interested in?">
+                    <ProductPicker value={form.products} onChange={(products) => setForm((f) => ({ ...f, products }))} allowEmpty />
+                    <p className="mt-1.5 text-xs text-slate-400">Pick any that apply, or leave blank if you're not sure yet.</p>
+                  </Field>
+                </div>
                 <div className="sm:col-span-2">
                   <Field label="Where is the installation? (optional)">
                     <LocationPicker value={form} onChange={(patch) => setForm((f) => ({ ...f, ...patch }))} height={240} />
@@ -114,9 +123,10 @@ export default function LeadCapture() {
 export function LeadsList() {
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('All')
+  const [product, setProduct] = useState('All')
   const [page, setPage] = useState(1)
   const [error, setError] = useState('')
-  const { data, loading, reload } = useFetch('/leads' + qs({ q: search, status, page }))
+  const { data, loading, reload } = useFetch('/leads' + qs({ q: search, status, products: product, page }))
   const { can } = useAuth()
   // Converting updates the lead and creates a client.
   const canConvert = can('leads', 'update') && can('clients', 'create')
@@ -132,6 +142,7 @@ export function LeadsList() {
     { key: 'fullName', header: 'Name', render: (r) => <span className="font-medium text-slate-900">{r.fullName}</span> },
     { key: 'email', header: 'Email' },
     { key: 'phone', header: 'Phone' },
+    { key: 'products', header: 'Interested in', render: (r) => <ProductChips products={r.products} size="xs" emptyLabel="Not sure" /> },
     { key: 'leadType', header: 'Lead Type' },
     { key: 'createdAt', header: 'Received', render: (r) => shortDate(r.createdAt) },
     { key: 'status', header: 'Status', render: (r) => <Badge>{r.status}</Badge> },
@@ -158,6 +169,11 @@ export function LeadsList() {
         <div className="flex flex-wrap gap-2 p-4 border-b border-slate-200">
           <SearchInput value={search} onChange={(v) => { setSearch(v); setPage(1) }} placeholder="Search leads..." />
           <Select value={status} onChange={setStatus} options={['All', 'New', 'Contacted', 'Survey Booked', 'Quoted', 'Closed']} />
+          <Select
+            value={product}
+            onChange={(v) => { setProduct(v); setPage(1) }}
+            options={[{ value: 'All', label: 'All interests' }, ...['ev', 'solar', 'battery'].map((k) => ({ value: k, label: productLabel(k) }))]}
+          />
         </div>
         {loading ? <Loading /> : (
           <>
