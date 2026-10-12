@@ -52,3 +52,18 @@ export function drawBrandHeader(doc, logo, { margin, height = 84 }) {
   doc.rect(pageW * 0.72, height, pageW * 0.28, 4, 'F')
   return height + 4
 }
+
+/** Footer line, label and "Page n of N" on every page (each page's own size, so landscape pages fit). */
+export function drawFooters(doc, label) {
+  const total = doc.getNumberOfPages()
+  for (let i = 1; i <= total; i++) {
+    doc.setPage(i)
+    const W = doc.internal.pageSize.getWidth()
+    const H = doc.internal.pageSize.getHeight()
+    const M = 40
+    doc.setDrawColor(226, 232, 240).setLineWidth(0.6).line(M, H - 32, W - M, H - 32)
+    doc.setFont('helvetica', 'normal').setFontSize(7.5).setTextColor(100, 116, 139)
+    doc.text(label, M, H - 18)
+    doc.text('Page ' + i + ' of ' + total, W - M, H - 18, { align: 'right' })
+  }
+}

@@ -65,6 +65,7 @@ export default function OverviewAnalytics({ installs, surveys, engineers }) {
             <div className="mt-3 divide-y divide-slate-100">
               <Row label="Overdue (install date passed)" value={s.overdue} className={s.overdue ? 'text-red-600' : 'text-slate-900'} to="/installations" />
               <Row label="Awaiting handover" value={s.awaitingHandover} className={s.awaitingHandover ? 'text-amber-600' : 'text-slate-900'} />
+              <Row label={'DNO approval pending' + (s.dnoLongestWait != null ? ' (longest ' + s.dnoLongestWait + ' d)' : '')} value={s.dnoPending ?? 0} className={s.dnoPending ? 'text-amber-600' : 'text-slate-900'} to="/installations" />
               <Row label="Installs in the next 14 days" value={s.upcoming} />
               <Row label="Avg days to complete" value={s.averageDaysToComplete ?? '--'} />
             </div>

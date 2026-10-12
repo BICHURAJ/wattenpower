@@ -17,6 +17,9 @@ import {
 import { StaticMap, useMapPrefs, streetViewUrl } from '../components/mapView'
 import { JobPhotos } from '../components/Photos'
 import HandoverPanel from '../components/Handover'
+import DnoPanel, { dnoSummary } from '../components/DnoPanel'
+import JobTasks from '../components/JobTasks'
+import JobNotes from '../components/JobNotes'
 
 const STATUSES = ['All', 'Scheduled', 'In Progress', 'Completed', 'On Hold', 'Cancelled']
 
@@ -155,10 +158,11 @@ export function InstallationsList() {
   }, [search])
   const [status, setStatus] = useState('All')
   const [product, setProduct] = useState('All')
+  const [dnoFilter, setDnoFilter] = useState('') // '' or 'Awaiting approval'
   const [page, setPage] = useState(1)
   const [showNew, setShowNew] = useState(false)
   const navigate = useNavigate()
-  const { data, loading, error, reload } = useFetch('/installations' + qs({ q: query, status, products: product, page }))
+  const { data, loading, error, reload } = useFetch('/installations' + qs({ q: query, status, products: product, 'dno.status': dnoFilter, page }))
   const [deletingId, setDeletingId] = useState(null)
   const [actionError, setActionError] = useState('')
   const [notice, setNotice] = useState('')
@@ -236,7 +240,14 @@ export function InstallationsList() {
         </button>
         {can('installations', 'create') && <button className="btn-primary" onClick={() => setShowNew(true)}>+ New Installation</button>}
       </PageHeader>
-      <InstallationAnalytics data={analytics.data} onPick={(st) => { setStatus(st); setPage(1) }} />
+      <InstallationAnalytics data={analytics.data} onPick={(st) => { setStatus(st); setDnoFilter(''); setPage(1) }}
+        onDno={() => { setDnoFilter('Awaiting approval'); setStatus('All'); setPage(1) }} dnoActive={Boolean(dnoFilter)} />
+      {dnoFilter && (
+        <p className="mb-3 flex items-center gap-2 text-sm text-amber-800">
+          <Badge tone="amber">Showing jobs awaiting DNO approval</Badge>
+          <button type="button" className="text-brand-600 hover:underline" onClick={() => setDnoFilter('')}>Show all</button>
+        </p>
+      )}
 
       <Banner>{error}</Banner>
       <Banner onDismiss={() => setActionError('')}>{actionError}</Banner>
@@ -591,6 +602,8 @@ export function InstallationDetails() {
   const canEdit = can('installations', 'update')
   // Progress steps, tasks and hold/resume: engineers (and admins) only.
   const canProgress = can('installationProgress', 'update')
+  // Engineers, to assign tasks to.
+  const engineerList = useFetch('/engineers?limit=200')
   // The job's site survey (Operations > Site Survey): its status drives the survey step.
   const [survey, setSurvey] = useState(null)
   useEffect(() => {
@@ -651,11 +664,6 @@ export function InstallationDetails() {
     } catch (err) { setError(err.message) }
   }
 
-  const toggleTask = async (taskId) => {
-    const tasks = install.tasks.map((t) => (t._id === taskId ? { ...t, done: !t.done } : t))
-    await api.put('/installations/' + id, { tasks })
-    reload()
-  }
 
   const onHold = install.status === 'On Hold'
   const canHold = !['Completed', 'Cancelled'].includes(install.status)
@@ -668,13 +676,6 @@ export function InstallationDetails() {
         if (reason === null) return // cancelled
         await api.post('/installations/' + id + '/hold', { reason })
       }
-      reload()
-    } catch (err) { setError(err.message) }
-  }
-
-  const notifyDno = async () => {
-    try {
-      await api.post('/installations/' + id + '/dno-notify')
       reload()
     } catch (err) { setError(err.message) }
   }
@@ -774,31 +775,11 @@ export function InstallationDetails() {
               <SystemDesignPanel install={install} products={products} canDesign={can('systemDesign', 'update')} onSaved={reload} />
             )}
 
-            {tab === 'Tasks' && (
-              <div className="divide-y divide-slate-100">
-                {(install.tasks || []).length === 0 && <p className="py-6 text-sm text-slate-400 text-center">No tasks added to this job.</p>}
-                {(install.tasks || []).map((task) => (
-                  <label key={task._id} className="flex items-center gap-3 py-2.5 text-sm cursor-pointer">
-                    <input type="checkbox" className="rounded border-slate-300" checked={task.done} disabled={!canProgress} onChange={() => toggleTask(task._id)} />
-                    <span className={task.done ? 'line-through text-slate-400' : 'text-slate-700'}>{task.title}</span>
-                  </label>
-                ))}
-              </div>
-            )}
+            {tab === 'Tasks' && <JobTasks install={install} engineers={engineerList.data?.items || []} canEdit={canEdit} />}
 
             {tab === 'Compliance' && (
               <div className="space-y-4 py-2">
-                <div className="flex items-center justify-between p-3 rounded-md bg-amber-50 border border-amber-200">
-                  <div>
-                    <p className="text-sm font-medium text-amber-900">DNO Notification</p>
-                    <p className="text-xs text-amber-700 mt-0.5">
-                      The local electricity network operator must be told about new {products.map((p) => productLabel(p).toLowerCase()).join(' and ')} equipment on the supply.
-                    </p>
-                  </div>
-                  {install.dnoNotified
-                    ? <Badge tone="green">Sent {shortDate(install.dnoNotifiedAt)}</Badge>
-                    : canEdit ? <button className="btn-primary" onClick={notifyDno}>Notify DNO</button> : <Badge tone="amber">Not sent</Badge>}
-                </div>
+                <DnoPanel install={install} products={products} canEdit={canEdit} onSaved={reload} />
                 <ul className="text-sm text-slate-600 space-y-1.5 list-disc pl-5">
                   <li>IET Wiring Regulations (18th Edition, BS 7671)</li>
                   {[...new Set(products.flatMap((p) => REGULATIONS[p] || []))].map((rule) => <li key={rule}>{rule}</li>)}
@@ -816,7 +797,7 @@ export function InstallationDetails() {
 
             {tab === 'Handover' && <HandoverPanel install={install} onChanged={reload} />}
 
-            {tab === 'Notes' && <p className="text-sm text-slate-600 py-4">{install.notes || 'No notes on this job.'}</p>}
+            {tab === 'Notes' && <JobNotes install={install} canEdit={canEdit} />}
           </Card>
         </div>
 
@@ -873,15 +854,19 @@ export function InstallationDetails() {
               const bySurvey = key === 'siteSurveyCompleted' && !done && survey && survey.status !== 'Completed'
               // Handover is ticked by completing the handover record.
               const byHandover = key === 'handover' && !done
-              const disabled = locked || laterDone || fromQuote || final || onHold || !canProgress || bySurvey || byHandover
+              // The DNO step waits for the network operator's approval.
+              const dnoWaiting = key === 'dnoApplication' && !done && ['Awaiting approval', 'Rejected'].includes(install.dno?.status)
+              const disabled = locked || laterDone || fromQuote || final || onHold || !canProgress || bySurvey || byHandover || dnoWaiting
               let hint = done ? 'Completed' : 'Pending'
               if (locked) hint = index > quoteStep && waitingFor.fromQuote ? 'Waiting for quote acceptance' : 'Waiting for "' + waitingFor.label + '"'
               if (onHold && !done && !fromQuote) hint = 'On hold'
               if (fromQuote) hint = quote ? quote.quoteNo + ' · ' + quote.status : 'No quotation linked'
               if (bySurvey) hint = 'Site survey ' + survey.status.toLowerCase() + ' · ' + (survey.progress?.percent || 0) + '% covered'
               if (byHandover && !locked) hint = 'Recorded in the Handover tab'
+              if (dnoWaiting && !locked) hint = 'DNO ' + dnoSummary(install.dno).toLowerCase()
               const title = bySurvey ? 'Completed from the site survey'
                 : byHandover ? 'Completed from the Handover tab'
+                : dnoWaiting ? 'Waiting for the DNO -- record the decision in the Compliance tab'
                 : fromQuote ? 'Set from the quotation status'
                 : onHold ? 'Resume the job to change its progress'
                 : final ? 'Completed -- cannot be undone'
@@ -905,6 +890,7 @@ export function InstallationDetails() {
                       {hint}
                       {bySurvey && <> · <Link to={'/site-survey/' + survey.id} className="text-brand-600 hover:underline">Open survey</Link></>}
                       {byHandover && <> · <button type="button" className="text-brand-600 hover:underline" onClick={() => setTab('Handover')}>Open handover</button></>}
+                      {dnoWaiting && <> · <button type="button" className="text-brand-600 hover:underline" onClick={() => setTab('Compliance')}>Update DNO</button></>}
                     </p>
                   </div>
                 </li>
@@ -1085,7 +1071,7 @@ const Row = ({ label, children }) => (
 )
 
 /** Analytics strip above the installations list; each tile filters the list. */
-function InstallationAnalytics({ data, onPick }) {
+function InstallationAnalytics({ data, onPick, onDno, dnoActive }) {
   if (!data) return null
   const s = data.stats
   const tile = (label, value, hint, { tone = 'text-slate-900', status } = {}) => (
@@ -1097,12 +1083,17 @@ function InstallationAnalytics({ data, onPick }) {
     </button>
   )
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3 mb-4">
+    <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-7 gap-3 mb-4">
       {tile('Active jobs', s.active, s.total + ' in total', { status: 'All' })}
       {tile('In progress', s.statusCounts['In Progress'] || 0, (s.statusCounts.Scheduled || 0) + ' scheduled', { tone: 'text-amber-600', status: 'In Progress' })}
       {tile('Overdue', s.overdue, 'Install date passed', { tone: s.overdue ? 'text-red-600' : 'text-slate-900' })}
       {tile('On hold', s.onHold, 'Paused jobs', { tone: s.onHold ? 'text-amber-600' : 'text-slate-900', status: 'On Hold' })}
       {tile('To hand over', s.awaitingHandover, 'Tested, not handed over', { tone: s.awaitingHandover ? 'text-brand-700' : 'text-slate-900' })}
+      <button type="button" onClick={onDno} className={'card p-4 text-left hover:shadow-md transition-shadow ' + (dnoActive ? 'ring-2 ring-amber-400' : '')}>
+        <p className="text-xs font-medium text-slate-500">DNO approval pending</p>
+        <p className={'mt-1 text-2xl font-semibold ' + (s.dnoPending ? 'text-amber-600' : 'text-slate-900')}>{s.dnoPending ?? 0}</p>
+        <p className="mt-1 text-xs text-slate-400 truncate">{s.dnoLongestWait != null ? 'Longest ' + s.dnoLongestWait + ' days' : s.dnoRejected ? s.dnoRejected + ' rejected' : 'None waiting'}</p>
+      </button>
       {tile('Completed', s.completionRate + '%', s.completedThisMonth + ' this month', { tone: 'text-emerald-600', status: 'Completed' })}
     </div>
   )

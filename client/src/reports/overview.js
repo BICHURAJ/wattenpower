@@ -1,5 +1,5 @@
 import { money, shortDate } from '../api'
-import { BRAND, BRAND_DARK, loadLogo, drawBrandHeader } from './brand'
+import { BRAND, BRAND_DARK, loadLogo, drawBrandHeader, drawFooters } from './brand'
 import { renderMapImage } from './mapImage'
 
 export const QUOTE_ORDER = ['Draft', 'Sent', 'Accepted', 'Declined', 'Expired']
@@ -53,15 +53,13 @@ const hexToRgb = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)
 /**
  * `map` (optional): { points: [{ lat, lng, colour, count }], filter, unplaced, legend: [[label, colour]] }
  */
-export async function exportOverviewPdf({ data, reports, user, map, ops = {} }) {
-  // Loaded on demand so the PDF library only downloads when someone exports.
-  const [{ jsPDF }, { default: autoTable }, logo] = await Promise.all([import('jspdf'), import('jspdf-autotable'), loadLogo()])
+/** Draws the report into `doc`, starting on its current page (see exportOverviewPdf). */
+export async function drawOverview(doc, { autoTable, logo, data, reports, user, map, ops = {} }) {
 
   const s = summarise(data, reports)
   // Quote money is for admin and finance only (the server leaves it out for others too).
   const showValues = Boolean(user?.permissions?.quoteValues)
   const { stats, upcoming, activities, expiring } = data
-  const doc = new jsPDF({ unit: 'pt', format: 'a4' })
   const pageW = doc.internal.pageSize.getWidth()
   const pageH = doc.internal.pageSize.getHeight()
   const M = 40
@@ -233,6 +231,7 @@ export async function exportOverviewPdf({ data, reports, user, map, ops = {} }) 
       ['Overdue', ops.installs.stats.overdue, ops.installs.stats.overdue > 0],
       ['On hold', ops.installs.stats.onHold],
       ['Awaiting handover', ops.installs.stats.awaitingHandover],
+      ['DNO approval pending', ops.installs.stats.dnoPending ?? 0, (ops.installs.stats.dnoPending || 0) > 0],
       ['Next 14 days', ops.installs.stats.upcoming],
       ['Completed this month', ops.installs.stats.completedThisMonth],
     ]],
@@ -257,7 +256,7 @@ export async function exportOverviewPdf({ data, reports, user, map, ops = {} }) 
     sectionTitle('Installations, surveys & engineers', 'Operations at a glance', 8)
     const pgap = 12
     const pw = (contentW - pgap * (panels.length - 1)) / panels.length
-    const ph = 30 + 6 * 16 + 10
+    const ph = 30 + Math.max(...panels.map((pn) => pn[2].length)) * 16 + 10
     if (y + ph > pageH - 50) { doc.addPage(); y = 56 }
     panels.forEach(([title, headline, rows], i) => {
       const x = M + i * (pw + pgap)
@@ -290,16 +289,13 @@ export async function exportOverviewPdf({ data, reports, user, map, ops = {} }) 
     recent.map((a) => [a.text, a.by || '-', shortDate(a.createdAt)]),
     { columnStyles: { 0: { cellWidth: contentW * 0.6 }, 2: { halign: 'right' } }, empty: 'No activity recorded yet.' },
   )
+}
 
-  // Footer on every page
-  const pages = doc.getNumberOfPages()
-  for (let i = 1; i <= pages; i++) {
-    doc.setPage(i)
-    doc.setDrawColor(...LINE).line(M, pageH - 34, pageW - M, pageH - 34)
-    doc.setTextColor(...MUTED).setFont('helvetica', 'normal').setFontSize(8)
-    doc.text('Watten Power Ltd  ·  Confidential', M, pageH - 20)
-    doc.text('Page ' + i + ' of ' + pages, pageW - M, pageH - 20, { align: 'right' })
-  }
-
-  doc.save('watten-power-overview-' + generated.toISOString().slice(0, 10) + '.pdf')
+/** Builds and downloads this report on its own. */
+export async function exportOverviewPdf(args) {
+  const [{ jsPDF }, { default: autoTable }, logo] = await Promise.all([import('jspdf'), import('jspdf-autotable'), loadLogo()])
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' })
+  await drawOverview(doc, { autoTable, logo, ...args })
+  drawFooters(doc, 'Watten Power Ltd  ·  Confidential')
+  doc.save('watten-power-overview-' + new Date().toISOString().slice(0, 10) + '.pdf')
 }

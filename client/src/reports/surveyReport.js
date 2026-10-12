@@ -1,5 +1,5 @@
 import { shortDate } from '../api'
-import { BRAND, loadLogo, drawBrandHeader } from './brand'
+import { BRAND, loadLogo, drawBrandHeader, drawFooters } from './brand'
 import { COMPANY } from './quotation'
 import { productLabel } from '../processes'
 
@@ -22,9 +22,8 @@ const STATUS_COLOURS = {
 const when = (d) => (d ? new Date(d).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '--')
 const products = (list) => (list || []).map(productLabel).join(', ')
 
-export async function exportSurveyReportPdf({ report, user }) {
-  const [{ jsPDF }, { default: autoTable }, logo] = await Promise.all([import('jspdf'), import('jspdf-autotable'), loadLogo()])
-  const doc = new jsPDF({ unit: 'pt', format: 'a4' })
+/** Draws the report into `doc`, starting on its current page (see exportSurveyReportPdf). */
+export async function drawSurveyReport(doc, { autoTable, logo, report, user }) {
   const W = doc.internal.pageSize.getWidth()
   const H = doc.internal.pageSize.getHeight()
   const M = 40
@@ -169,14 +168,13 @@ export async function exportSurveyReportPdf({ report, user }) {
   table(['Job', 'Client', 'Postcode', 'System', 'Install date'],
     report.notStarted.slice(0, 30).map((r) => [r.installNo, r.client || '--', r.postcode || '--', products(r.products), r.installDate ? shortDate(r.installDate) : 'Not booked']))
   if (report.notStarted.length > 30) { text('...and ' + (report.notStarted.length - 30) + ' more.', M, y - 12, { size: 8, colour: MUTED }) }
+}
 
-  // --- Footer -------------------------------------------------------------------------
-  const total = doc.getNumberOfPages()
-  for (let i = 1; i <= total; i++) {
-    doc.setPage(i)
-    doc.setDrawColor(...LINE).setLineWidth(0.6).line(M, H - 34, W - M, H - 34)
-    text(COMPANY.name + '  ·  Site survey report  ·  Confidential', M, H - 20, { size: 7.5, colour: MUTED })
-    text('Page ' + i + ' of ' + total, W - M, H - 20, { size: 7.5, colour: MUTED, align: 'right' })
-  }
+/** Builds and downloads this report on its own. */
+export async function exportSurveyReportPdf(args) {
+  const [{ jsPDF }, { default: autoTable }, logo] = await Promise.all([import('jspdf'), import('jspdf-autotable'), loadLogo()])
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' })
+  await drawSurveyReport(doc, { autoTable, logo, ...args })
+  drawFooters(doc, COMPANY.name + '  ·  Site survey report  ·  Confidential')
   doc.save('site-survey-report-' + new Date().toISOString().slice(0, 10) + '.pdf')
 }

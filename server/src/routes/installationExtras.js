@@ -1,4 +1,5 @@
 import express from 'express'
+import mongoose from 'mongoose'
 import Installation from '../models/Installation.js'
 import Client from '../models/Client.js'
 import Activity from '../models/Activity.js'
@@ -16,6 +17,163 @@ const needProgressRight = (req, res) => {
   res.status(403).json({ error: 'Only engineers can record the handover.' })
   return false
 }
+
+// --- Tasks ---------------------------------------------------------------------------
+// Anyone who can edit installations works on a job's tasks (authorize() checks
+// installations/update for these PUT, POST and DELETE requests).
+
+// Standard tasks for each product, added with "Add standard tasks".
+export const STANDARD_TASKS = {
+  ev: ['Confirm charger model and stock', 'Confirm install date with the customer', 'Install charger and cabling',
+    'Test and commission; set up the charging app', 'Register the charger and send DNO notification', 'Submit OZEV grant claim (if eligible)'],
+  solar: ['Order panels, inverter and mounting kit', 'Book scaffolding', 'Submit DNO application (G98/G99)',
+    'Install panels, inverter and isolators', 'Test and commission; record string readings', 'Register on MCS and issue the certificate', 'Arrange scaffolding removal'],
+  battery: ['Order battery and confirm location', 'Install battery and isolation', 'Commission and set up monitoring', 'Record battery in the MCS certificate'],
+}
+
+router.post('/:id/tasks', async (req, res, next) => {
+  try {
+    const job = await Installation.findById(req.params.id)
+    if (!job) return res.status(404).json({ error: 'Installation not found' })
+    const b = req.body || {}
+    // { standard: true } adds the product checklist, skipping titles already on the job.
+    const titles = b.standard
+      ? [...new Set((job.products?.length ? job.products : ['ev']).flatMap((p) => STANDARD_TASKS[p] || []))]
+          .filter((t) => !job.tasks.some((x) => x.title?.toLowerCase() === t.toLowerCase()))
+      : [String(b.title || '').trim()].filter(Boolean)
+    if (!titles.length) return res.status(400).json({ error: b.standard ? 'The standard tasks are already on this job.' : 'Give the task a title.' })
+    for (const title of titles) {
+      job.tasks.push({
+        title: title.slice(0, 200),
+        dueDate: b.dueDate ? new Date(b.dueDate) : undefined,
+        assignedTo: mongoose.isValidObjectId(b.assignedTo) ? b.assignedTo : undefined,
+        createdBy: req.user.name,
+      })
+    }
+    await job.save()
+    res.status(201).json(job.tasks)
+  } catch (err) { next(err) }
+})
+
+router.put('/:id/tasks/:taskId', async (req, res, next) => {
+  try {
+    const job = await Installation.findById(req.params.id)
+    const task = job?.tasks.id(req.params.taskId)
+    if (!task) return res.status(404).json({ error: 'Task not found' })
+    const b = req.body || {}
+    if ('title' in b) {
+      const title = String(b.title || '').trim()
+      if (!title) return res.status(400).json({ error: 'Give the task a title.' })
+      task.title = title.slice(0, 200)
+    }
+    if ('dueDate' in b) task.dueDate = b.dueDate ? new Date(b.dueDate) : undefined
+    if ('assignedTo' in b) task.assignedTo = mongoose.isValidObjectId(b.assignedTo) ? b.assignedTo : undefined
+    if ('done' in b && Boolean(b.done) !== task.done) {
+      task.done = Boolean(b.done)
+      task.doneAt = task.done ? new Date() : undefined
+      task.doneBy = task.done ? req.user.name : undefined
+    }
+    await job.save()
+    res.json(job.tasks)
+  } catch (err) { next(err) }
+})
+
+router.delete('/:id/tasks/:taskId', async (req, res, next) => {
+  try {
+    const job = await Installation.findById(req.params.id)
+    const task = job?.tasks.id(req.params.taskId)
+    if (!task) return res.status(404).json({ error: 'Task not found' })
+    task.deleteOne()
+    await job.save()
+    res.json(job.tasks)
+  } catch (err) { next(err) }
+})
+
+// --- Notes -------------------------------------------------------------------------
+// Anyone who can edit installations adds notes; you edit or delete your own,
+// and people who can delete installations (admins) can remove any.
+
+const ownNote = (req, note) => String(note.authorId) === String(req.user._id)
+
+router.post('/:id/notes', async (req, res, next) => {
+  try {
+    const job = await Installation.findById(req.params.id)
+    if (!job) return res.status(404).json({ error: 'Installation not found' })
+    const body = String(req.body?.body || '').trim()
+    if (!body) return res.status(400).json({ error: 'Write a note first.' })
+    job.noteLog.push({ body: body.slice(0, 4000), author: req.user.name, authorId: req.user._id })
+    await job.save()
+    res.status(201).json(job.noteLog)
+  } catch (err) { next(err) }
+})
+
+router.put('/:id/notes/:noteId', async (req, res, next) => {
+  try {
+    const job = await Installation.findById(req.params.id)
+    const note = job?.noteLog.id(req.params.noteId)
+    if (!note) return res.status(404).json({ error: 'Note not found' })
+    if (!ownNote(req, note)) return res.status(403).json({ error: 'You can only edit your own notes.' })
+    const body = String(req.body?.body || '').trim()
+    if (!body) return res.status(400).json({ error: 'A note cannot be empty. Delete it instead.' })
+    note.body = body.slice(0, 4000)
+    note.editedAt = new Date()
+    await job.save()
+    res.json(job.noteLog)
+  } catch (err) { next(err) }
+})
+
+router.delete('/:id/notes/:noteId', async (req, res, next) => {
+  try {
+    const job = await Installation.findById(req.params.id)
+    const note = job?.noteLog.id(req.params.noteId)
+    if (!note) return res.status(404).json({ error: 'Note not found' })
+    if (!ownNote(req, note) && !userCan(req.user, 'installations', 'delete')) return res.status(403).json({ error: 'You can only delete your own notes.' })
+    note.deleteOne()
+    await job.save()
+    res.json(job.noteLog)
+  } catch (err) { next(err) }
+})
+
+// --- DNO application / notification -------------------------------------------------
+
+// Save the job's DNO record: { route, status, reference, submittedAt, decisionAt, notes }.
+// Approval (or a confirmed notification) ticks the "DNO application" step when the
+// steps before it are done, and marks the job as notified.
+router.put('/:id/dno', async (req, res, next) => {
+  try {
+    const job = await Installation.findById(req.params.id)
+    if (!job) return res.status(404).json({ error: 'Installation not found' })
+    const b = req.body || {}
+    const before = job.dno?.status || 'Not submitted'
+    const record = { ...(job.dno?.toObject?.() || {}) }
+    for (const key of ['route', 'status', 'reference', 'notes']) if (key in b) record[key] = b[key] ?? ''
+    for (const key of ['submittedAt', 'decisionAt']) if (key in b) record[key] = b[key] ? new Date(b[key]) : undefined
+    // Sensible dates when they weren't given.
+    if (record.status === 'Awaiting approval' && !record.submittedAt) record.submittedAt = new Date()
+    if (['Approved', 'Rejected', 'Notified'].includes(record.status) && !record.decisionAt) record.decisionAt = new Date()
+    job.dno = record
+    if (['Approved', 'Notified'].includes(record.status)) {
+      job.dnoNotified = true
+      job.dnoNotifiedAt = job.dnoNotifiedAt || record.decisionAt
+      // Tick the step when it's this job's next one (steps go in order).
+      const has = stepsFor(job.products).some((st) => st.key === 'dnoApplication')
+      const current = Object.fromEntries(job.progress || [])
+      if (has && !current.dnoApplication && !progressOrderProblem(job.products, current, { ...current, dnoApplication: true }) && job.status !== 'On Hold') {
+        job.progress.set('dnoApplication', true)
+      }
+    }
+    await job.save()
+    if (before !== record.status) {
+      await Activity.create({
+        type: 'compliance',
+        text: 'DNO ' + (record.route ? record.route + ' ' : '') + 'for ' + job.installNo + ': ' + record.status.toLowerCase() + (record.reference ? ' (' + record.reference + ')' : ''),
+        refId: job._id,
+        by: req.user?.name,
+      })
+    }
+    res.json(job)
+  } catch (err) { next(err) }
+})
 
 // --- Handover ------------------------------------------------------------------------
 
@@ -105,7 +263,7 @@ router.post('/:id/handover/complete', async (req, res, next) => {
 router.get('/report', async (req, res, next) => {
   try {
     const jobs = await Installation.find({ ...(await Client.activeOnly()) })
-      .select('installNo client engineer products status installDate completedAt progress hold postcode address handover.completedAt')
+      .select('installNo client engineer products status installDate completedAt progress hold postcode address handover.completedAt dno')
       .populate('client', 'name postcode')
       .populate('engineer', 'name')
       .lean()
@@ -184,6 +342,15 @@ router.get('/report', async (req, res, next) => {
 
     const byDate = (key) => (a, b) => new Date(a[key] || 0) - new Date(b[key] || 0)
     const completed = live.filter((j) => j.status === 'Completed')
+    const dnoPending = live.filter((j) => j.status !== 'Completed' && j.dno?.status === 'Awaiting approval')
+      .sort((a, b) => new Date(a.dno.submittedAt || 0) - new Date(b.dno.submittedAt || 0))
+    const dnoRow = (j) => ({
+      ...row(j),
+      route: j.dno.route || null,
+      reference: j.dno.reference || null,
+      submittedAt: j.dno.submittedAt || null,
+      daysWaiting: j.dno.submittedAt ? Math.floor((Date.now() - new Date(j.dno.submittedAt)) / 864e5) : null,
+    })
     res.json({
       generatedAt: new Date(),
       stats: {
@@ -198,6 +365,9 @@ router.get('/report', async (req, res, next) => {
         onHold: live.filter((j) => j.status === 'On Hold').length,
         awaitingHandover: live.filter(awaitingHandover).length,
         handoverRecorded: completed.filter((j) => j.handover?.completedAt).length,
+        dnoPending: dnoPending.length,
+        dnoRejected: live.filter((j) => j.status !== 'Completed' && j.dno?.status === 'Rejected').length,
+        dnoLongestWait: dnoPending.length && dnoPending[0].dno.submittedAt ? Math.floor((Date.now() - new Date(dnoPending[0].dno.submittedAt)) / 864e5) : null,
         averageDaysToComplete: durations.length ? Math.round((durations.reduce((a, b) => a + b, 0) / durations.length) * 10) / 10 : null,
         byProduct,
       },
@@ -208,6 +378,7 @@ router.get('/report', async (req, res, next) => {
       upcoming: open.filter((j) => j.status !== 'On Hold' && j.installDate && new Date(j.installDate) >= today && new Date(j.installDate) < fortnight).sort(byDate('installDate')).map(row),
       onHold: live.filter((j) => j.status === 'On Hold').sort((a, b) => new Date(a.hold?.since || 0) - new Date(b.hold?.since || 0)).map(row),
       awaitingHandover: live.filter(awaitingHandover).sort(byDate('installDate')).map(row),
+      dnoPending: dnoPending.map(dnoRow),
       recentlyCompleted: completed.sort((a, b) => new Date(b.completedAt || 0) - new Date(a.completedAt || 0)).slice(0, 10).map(row),
     })
   } catch (err) { next(err) }

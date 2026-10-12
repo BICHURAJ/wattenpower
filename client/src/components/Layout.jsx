@@ -14,7 +14,6 @@ const NAV_GROUPS = [
     label: 'Monitor',
     items: [
       { to: '/', label: 'Overview', end: true, resource: 'dashboard', icon: 'M3 12h7V3H3v9Zm11 9h7v-9h-7v9ZM3 21h7v-6H3v6Zm11-12h7V3h-7v6Z' },
-      { to: '/reports', label: 'Reports', resource: 'dashboard', icon: 'M4 20V10M10 20V4M16 20v-7M22 20H2' },
     ],
   },
   {

@@ -88,7 +88,7 @@ function installationHtml(inst, where) {
     ['Charger', products.includes('ev') ? [inst.chargerModel, inst.supplyType].filter(Boolean).join(' · ') : null],
     ['Fit point', inst.location],
     ['Access', inst.accessNotes],
-    ['DNO', inst.dnoNotified ? 'Notified' : 'Not notified'],
+    ['DNO', inst.dno?.status && inst.dno.status !== 'Not submitted' ? inst.dno.status : inst.dnoNotified ? 'Notified' : 'Not submitted'],
   ].filter(([, v]) => v)
 
   return `

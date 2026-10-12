@@ -202,7 +202,7 @@ export function Pagination({ page, pages, total, onChange }) {
 
 export function Tabs({ tabs, active, onChange }) {
   return (
-    <div className="inline-flex max-w-full gap-1 p-1 mb-4 rounded-xl bg-white border border-slate-100 shadow-soft overflow-x-auto no-scrollbar">
+    <div className="inline-flex max-w-full gap-1 p-1 mb-4 rounded-xl bg-white border border-slate-100 shadow-soft overflow-x-auto no-scrollbar sm:flex-wrap">
       {tabs.map((tab) => (
         <button
           key={tab}

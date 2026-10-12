@@ -19,7 +19,6 @@ import { QuotationsList, QuotationCreate, QuotationEdit, QuotationDetails } from
 import { InstallationsList, InstallationDetails, InstallationCertification } from './pages/Installations'
 import { SupportList, GrantsList, GrantSubmission } from './pages/Support'
 import { ComplianceHub, StockInventory, VansTools, Engineers, DocumentsPage } from './pages/Operations'
-import { Reports } from './pages/Misc'
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
@@ -55,7 +54,6 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             <Route path="documents" element={<DocumentsPage />} />
             <Route path="stock" element={<StockInventory />} />
             <Route path="vans" element={<VansTools />} />
-            <Route path="reports" element={<Reports />} />
             <Route path="users" element={<Users />} />
             <Route path="messages" element={<Messages />} />
             <Route path="messages/:id" element={<Messages />} />

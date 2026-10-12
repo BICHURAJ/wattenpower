@@ -39,9 +39,11 @@ export async function requireAuth(req, res, next) {
 }
 
 /**
- * The permission an API request needs on `resource`: GET reads, DELETE
- * deletes, PUT/PATCH update. POST to the collection creates; POST to a record
- * (e.g. /:id/accept, /:id/hold) is a workflow step on it, so it updates.
+ * The permission an API request needs on `resource`: GET reads, PUT/PATCH
+ * update. POST to the collection creates; POST to a record (e.g. /:id/accept,
+ * /:id/hold) is a workflow step on it, so it updates. DELETE of a record
+ * (/:id) deletes it; DELETE of something inside a record (e.g. a job's task,
+ * /:id/tasks/:taskId) changes that record, so it updates.
  */
 export function actionFor(req) {
   switch (req.method) {
@@ -49,7 +51,7 @@ export function actionFor(req) {
     case 'HEAD':
       return 'read'
     case 'DELETE':
-      return 'delete'
+      return req.path.split('/').filter(Boolean).length > 1 ? 'update' : 'delete'
     case 'PUT':
     case 'PATCH':
       return 'update'

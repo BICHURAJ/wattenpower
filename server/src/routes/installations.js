@@ -26,6 +26,7 @@ router.post('/:id/dno-notify', async (req, res, next) => {
 
     install.dnoNotified = true
     install.dnoNotifiedAt = new Date()
+    install.dno = { ...(install.dno?.toObject?.() || {}), status: 'Notified', decisionAt: install.dnoNotifiedAt }
     await install.save()
 
     await Activity.create({
@@ -238,7 +239,7 @@ router.get('/:id', async (req, res, next) => {
 router.use('/', crudRouter(Installation, {
   // Every word must match the job, its client, engineer, quote or products (installationSearch.js).
   search: installationSearch,
-  filterFields: ['status', 'products'], // ?products=solar
+  filterFields: ['status', 'products', 'dno.status'], // ?products=solar  ?dno.status=Awaiting approval
   populate: POPULATE,
   defaultSort: '-installDate',
   // Jobs of Inactive clients are hidden, unless a client is asked for by ?client=.

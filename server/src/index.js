@@ -6,7 +6,7 @@ import { connectDB } from './db.js'
 import { clearUnlinkedQuoteSteps } from './quoteProgress.js'
 import User from './models/User.js'
 import Activity from './models/Activity.js'
-import { migrateProducts } from './productMigration.js'
+import { migrateProducts, migrateDno } from './productMigration.js'
 import { backfillSurveys } from './surveyService.js'
 
 // Check the security settings before anything else, so a bad deploy stops here.
@@ -25,6 +25,7 @@ connectDB()
   .then(() => User.migrateRoles())
   .then(() => Activity.backfillUsers())
   .then(() => migrateProducts())
+  .then(() => migrateDno())
   .then(() => clearUnlinkedQuoteSteps())
   // Every installation has a site survey (older jobs get one here).
   .then(() => backfillSurveys())

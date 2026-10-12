@@ -111,6 +111,7 @@ test('HTTP requests map to the right action', () => {
   assert.equal(actionFor({ method: 'POST', path: '/abc/accept' }), 'update') // workflow step on a record
   assert.equal(actionFor({ method: 'PUT', path: '/abc' }), 'update')
   assert.equal(actionFor({ method: 'DELETE', path: '/abc' }), 'delete')
+  assert.equal(actionFor({ method: 'DELETE', path: '/abc/tasks/xyz' }), 'update') // removing a part of a record
   assert.equal(actionFor({ method: 'TRACE', path: '/' }), null)
 })
 

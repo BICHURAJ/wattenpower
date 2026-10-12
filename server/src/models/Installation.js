@@ -1,12 +1,30 @@
 import mongoose from 'mongoose'
+
+// How a job is put to the network operator, and where that has got to.
+export const DNO_ROUTES = ['G98', 'G99', 'EV charge point', 'Not required']
+export const DNO_STATUSES = ['Not submitted', 'Awaiting approval', 'Approved', 'Rejected', 'Notified']
 import { LocationSchema } from './Client.js'
 import { SystemDesignSchema } from './SystemDesign.js'
 import { PRODUCT_KEYS, HAND_STEP_KEYS, stepDone, progressOrderProblem } from '../processes.js'
 
+// A job task: something to do on this job, optionally due by a date and assigned to an engineer.
 const TaskSchema = new mongoose.Schema({
-  title: String,
+  title: { type: String, trim: true, maxlength: 200 },
   done: { type: Boolean, default: false },
-}, { _id: true })
+  dueDate: Date,
+  assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: 'Engineer' },
+  createdBy: String,
+  doneAt: Date,
+  doneBy: String,
+}, { _id: true, timestamps: true })
+
+// A note on the job's log (Notes tab). The job's single `notes` field stays as its general notes.
+const NoteSchema = new mongoose.Schema({
+  body: { type: String, required: true, trim: true, maxlength: 4000 },
+  author: String,
+  authorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  editedAt: Date,
+}, { _id: true, timestamps: true })
 
 // Screens 9/10 -- covers "Technical Team / Lead Engineer" through "Installation Completed".
 const InstallationSchema = new mongoose.Schema({
@@ -41,6 +59,17 @@ const InstallationSchema = new mongoose.Schema({
   // "Project Compliance Hub -- DNO Notification" node on the workflow.
   dnoNotified: { type: Boolean, default: false },
   dnoNotifiedAt: Date,
+  // The DNO application / notification and where it's got to (see DNO_STATUSES).
+  // "Awaiting approval" is a G99 (or EV) application the network operator
+  // hasn't decided yet -- the job can't be installed until it's approved.
+  dno: {
+    route: { type: String, enum: ['', ...DNO_ROUTES], default: '' },
+    status: { type: String, enum: DNO_STATUSES, default: 'Not submitted' },
+    reference: { type: String, trim: true, maxlength: 100 },
+    submittedAt: Date,
+    decisionAt: Date,
+    notes: { type: String, trim: true, maxlength: 1000 },
+  },
   // When the job was marked Completed (cleared if it is reopened).
   completedAt: Date,
   // Set while the job is On Hold, so it can be shown and resumed where it left off.
@@ -51,6 +80,7 @@ const InstallationSchema = new mongoose.Schema({
   },
   tasks: [TaskSchema],
   notes: String,
+  noteLog: [NoteSchema],
   // Handover record: commissioning results, certificates and what the customer
   // was given (handoverChecklist.js). Completing it ticks the Handover step.
   handover: {
@@ -86,6 +116,18 @@ InstallationSchema.pre('validate', function (next) {
   if (!this.isNew && !this.$locals.fromHandover && this.isModified('progress.handover') &&
       stepDone(this.progress, 'handover') && !stepDone(this.$locals.loadedProgress, 'handover')) {
     this.invalidate('progress.handover', 'Complete the handover (Handover tab) to tick this step.')
+  }
+  next()
+})
+
+// The DNO step waits for the network operator: it can't be ticked while an
+// application is awaiting approval or was rejected.
+InstallationSchema.pre('validate', function (next) {
+  if (!this.isNew && this.isModified('progress.dnoApplication') && stepDone(this.progress, 'dnoApplication') &&
+      !stepDone(this.$locals.loadedProgress, 'dnoApplication') && ['Awaiting approval', 'Rejected'].includes(this.dno?.status)) {
+    this.invalidate('progress.dnoApplication', this.dno.status === 'Rejected'
+      ? 'The DNO rejected the application. Update the DNO record before ticking this step.'
+      : 'DNO approval is still pending. Record the approval (Compliance tab) to tick this step.')
   }
   next()
 })

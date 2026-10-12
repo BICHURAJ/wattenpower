@@ -1,5 +1,5 @@
 import { shortDate } from '../api'
-import { BRAND, loadLogo, drawBrandHeader } from './brand'
+import { BRAND, loadLogo, drawBrandHeader, drawFooters } from './brand'
 import { COMPANY } from './quotation'
 import { RATE_TONES, DEFINITIONS } from '../components/EngineerPerformance'
 
@@ -16,9 +16,18 @@ const COLOURS = { good: [5, 150, 105], ok: [217, 119, 6], bad: [220, 38, 38] }
 const PALETTE = [[0, 106, 253], [16, 185, 129], [245, 158, 11], [139, 92, 246], [236, 72, 153], [20, 184, 166], [100, 116, 139]]
 const pct = (v) => (v == null ? '--' : v + '%')
 
-export async function exportEngineerReportPdf({ report, user }) {
-  const [{ jsPDF }, { default: autoTable }, logo] = await Promise.all([import('jspdf'), import('jspdf-autotable'), loadLogo()])
-  const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'landscape' })
+/** Draws the report into `doc`, starting on its current page (see exportEngineerReportPdf). */
+export async function drawEngineerReport(doc, { autoTable, logo, report, user }) {
+  const addPage = doc.addPage
+  doc.addPage = (...a) => (a.length ? addPage.apply(doc, a) : addPage.call(doc, 'a4', 'landscape'))
+  try {
+    await drawEngineerBody(doc, { autoTable, logo, report, user })
+  } finally {
+    doc.addPage = addPage
+  }
+}
+
+async function drawEngineerBody(doc, { autoTable, logo, report, user }) {
   const W = doc.internal.pageSize.getWidth()
   const H = doc.internal.pageSize.getHeight()
   const M = 36
@@ -155,13 +164,13 @@ export async function exportEngineerReportPdf({ report, user }) {
   if (y + 60 > H - 40) { doc.addPage(); y = 44 }
   text('How the figures are worked out', M, y, { size: 9, bold: true, colour: INK })
   DEFINITIONS.forEach(([k, v], i) => text(k + ': ' + v + '.', M, y + 14 + i * 11, { size: 7.8, colour: MUTED }))
+}
 
-  const total = doc.getNumberOfPages()
-  for (let i = 1; i <= total; i++) {
-    doc.setPage(i)
-    doc.setDrawColor(...LINE).setLineWidth(0.6).line(M, H - 28, W - M, H - 28)
-    text(COMPANY.name + '  ·  Engineers performance report  ·  Confidential', M, H - 16, { size: 7.5, colour: MUTED })
-    text('Page ' + i + ' of ' + total, W - M, H - 16, { size: 7.5, colour: MUTED, align: 'right' })
-  }
+/** Builds and downloads this report on its own. */
+export async function exportEngineerReportPdf(args) {
+  const [{ jsPDF }, { default: autoTable }, logo] = await Promise.all([import('jspdf'), import('jspdf-autotable'), loadLogo()])
+  const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'landscape' })
+  await drawEngineerReport(doc, { autoTable, logo, ...args })
+  drawFooters(doc, COMPANY.name + '  ·  Engineers performance report  ·  Confidential')
   doc.save('engineers-report-' + new Date().toISOString().slice(0, 10) + '.pdf')
 }

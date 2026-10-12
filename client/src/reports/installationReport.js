@@ -1,5 +1,5 @@
 import { shortDate } from '../api'
-import { BRAND, loadLogo, drawBrandHeader } from './brand'
+import { BRAND, loadLogo, drawBrandHeader, drawFooters } from './brand'
 import { COMPANY } from './quotation'
 import { productLabel } from '../processes'
 
@@ -23,9 +23,8 @@ const STATUS_COLOURS = {
 }
 const products = (list) => (list || []).map(productLabel).join(', ')
 
-export async function exportInstallationReportPdf({ report, user }) {
-  const [{ jsPDF }, { default: autoTable }, logo] = await Promise.all([import('jspdf'), import('jspdf-autotable'), loadLogo()])
-  const doc = new jsPDF({ unit: 'pt', format: 'a4' })
+/** Draws the report into `doc`, starting on its current page (see exportInstallationReportPdf). */
+export async function drawInstallationReport(doc, { autoTable, logo, report, user }) {
   const W = doc.internal.pageSize.getWidth()
   const H = doc.internal.pageSize.getHeight()
   const M = 40
@@ -157,6 +156,11 @@ export async function exportInstallationReportPdf({ report, user }) {
     report.overdue.map((r) => [r.installNo, r.client || '--', shortDate(r.installDate), String(daysAgo(r.installDate)), r.stage, r.engineer || 'Unassigned']),
     (d) => { if (d.section === 'body' && d.column.index === 3) { d.cell.styles.textColor = RED; d.cell.styles.fontStyle = 'bold' } })
 
+  section('DNO approval pending', 'Applications the network operator has not decided yet -- longest wait first', (report.dnoPending || []).length)
+  table(['Job', 'Client', 'Route', 'Reference', 'Submitted', 'Days waiting', 'Engineer'],
+    (report.dnoPending || []).map((r) => [r.installNo, r.client || '--', r.route || '--', r.reference || '--', r.submittedAt ? shortDate(r.submittedAt) : '--', r.daysWaiting != null ? String(r.daysWaiting) : '--', r.engineer || 'Unassigned']),
+    (d) => { if (d.section === 'body' && d.column.index === 5 && Number(d.cell.raw) > 30) { d.cell.styles.textColor = RED; d.cell.styles.fontStyle = 'bold' } })
+
   section('Awaiting handover', 'Tested and certified, but not yet handed over to the customer', report.awaitingHandover.length)
   table(['Job', 'Client', 'System', 'Install date', 'Waiting on', 'Engineer'],
     report.awaitingHandover.map((r) => [r.installNo, r.client || '--', products(r.products), shortDate(r.installDate), r.stage, r.engineer || 'Unassigned']))
@@ -181,13 +185,13 @@ export async function exportInstallationReportPdf({ report, user }) {
   table(['Completed', 'Job', 'Client', 'System', 'Engineer'],
     report.recentlyCompleted.map((r) => [r.completedAt ? shortDate(r.completedAt) : '--', r.installNo, r.client || '--', products(r.products), r.engineer || 'Unassigned']))
   text('Handover recorded in the CRM for ' + s.handoverRecorded + ' of ' + s.completed + ' completed jobs.', M, y - 8, { size: 8, colour: MUTED })
+}
 
-  const total = doc.getNumberOfPages()
-  for (let i = 1; i <= total; i++) {
-    doc.setPage(i)
-    doc.setDrawColor(...LINE).setLineWidth(0.6).line(M, H - 34, W - M, H - 34)
-    text(COMPANY.name + '  ·  Installations report  ·  Confidential', M, H - 20, { size: 7.5, colour: MUTED })
-    text('Page ' + i + ' of ' + total, W - M, H - 20, { size: 7.5, colour: MUTED, align: 'right' })
-  }
+/** Builds and downloads this report on its own. */
+export async function exportInstallationReportPdf(args) {
+  const [{ jsPDF }, { default: autoTable }, logo] = await Promise.all([import('jspdf'), import('jspdf-autotable'), loadLogo()])
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' })
+  await drawInstallationReport(doc, { autoTable, logo, ...args })
+  drawFooters(doc, COMPANY.name + '  ·  Installations report  ·  Confidential')
   doc.save('installations-report-' + new Date().toISOString().slice(0, 10) + '.pdf')
 }

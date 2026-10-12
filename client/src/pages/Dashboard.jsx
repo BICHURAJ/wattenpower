@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { money, qs, shortDate, timeAgo } from '../api'
+import { api, money, qs, shortDate, timeAgo } from '../api'
 import { availabilityOn, localDayKey } from '../availability'
 import { useAuth } from '../auth'
 import { Card, StatCard, Badge, Loading, Banner, useFetch } from '../components/ui'
@@ -271,6 +271,30 @@ export default function Dashboard() {
     return { points, filter: mapFilter + (mapProduct === 'All' ? '' : ' ' + productLabel(mapProduct)), unplaced, legend }
   }
 
+  // Everything in one PDF: the Overview plus the Installations, Site Survey and
+  // Engineers reports this user can see (the full survey report is fetched here).
+  const exportAll = async () => {
+    setExporting(true)
+    setExportError('')
+    try {
+      const [{ exportAnalyticsPack }, surveyReport] = await Promise.all([
+        import('../reports/analyticsPack'),
+        can('siteSurveys') ? api.get('/site-surveys/report') : null,
+      ])
+      await exportAnalyticsPack({
+        overview: { data, reports, map: pdfMap(), ops: { installs: installReport, surveys: surveyStats, engineers: engineerReport } },
+        installs: installReport,
+        surveys: surveyReport,
+        engineers: engineerReport,
+        user,
+      })
+    } catch (err) {
+      setExportError('Could not create the PDF: ' + err.message)
+    } finally {
+      setExporting(false)
+    }
+  }
+
   const exportPdf = async () => {
     setExporting(true)
     setExportError('')
@@ -290,10 +314,15 @@ export default function Dashboard() {
           <h1 className="text-xl font-semibold tracking-tight text-slate-900">Overview</h1>
           <p className="text-sm text-slate-400">Sales, jobs and support at a glance</p>
         </div>
-        <button className="btn-primary rounded-full" onClick={exportPdf} disabled={exporting || !reports}>
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" /></svg>
-          {exporting ? 'Preparing PDF...' : 'Export report'}
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button className="btn-secondary rounded-full" onClick={exportPdf} disabled={exporting || !reports} title="The Overview on its own">
+            Overview only
+          </button>
+          <button className="btn-primary rounded-full" onClick={exportAll} disabled={exporting || !reports} title="Overview, Installations, Site Survey and Engineers reports in one PDF">
+            <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" /></svg>
+            {exporting ? 'Preparing PDF...' : 'Export all analytics'}
+          </button>
+        </div>
       </div>
       <Banner onDismiss={() => setExportError('')}>{exportError}</Banner>
 
