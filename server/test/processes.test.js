@@ -95,3 +95,9 @@ test('Completed needs every step, including solar ones', async () => {
   const noMcs = { ...all, mcsCertificate: false, scaffoldingDown: false, handover: false }
   assert.match(progressOrderProblem(['solar'], noMcs, noMcs, { completing: true }).message, /MCS certificate/)
 })
+
+test('an accepted quote never blocks unticking an earlier step', async () => {
+  const { progressOrderProblem } = await import('../src/processes.js')
+  const before = { siteSurveyCompleted: true, quotationAccepted: true }
+  assert.equal(progressOrderProblem(['ev'], before, { ...before, siteSurveyCompleted: false }), null)
+})

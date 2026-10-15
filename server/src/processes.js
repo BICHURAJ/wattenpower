@@ -91,7 +91,8 @@ export function progressOrderProblem(products, before, after, { completing = fal
       if (missing) return { key, message: 'Complete "' + missing.label + '" before "' + label + '".' }
     }
     if (was && !now) {
-      const later = steps.slice(i + 1).find((s) => stepDone(after, s.key))
+      // The quote step follows the quotation, so it never has to be unticked first.
+      const later = steps.slice(i + 1).find((s) => !s.fromQuote && stepDone(after, s.key))
       if (later) return { key, message: 'Untick "' + later.label + '" before "' + label + '".' }
     }
   }

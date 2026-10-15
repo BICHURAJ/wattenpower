@@ -46,7 +46,7 @@ export async function exportProposalPdf({ job, quote = null, siteImage = null, p
   const products = normaliseProducts(job.products)
   const hasBattery = products.includes('battery') && Number(design.batteryKwh) > 0
   const kWp = kWpOf(design) || 0
-  const price = quote ? quoteTotals(quote.items).total : null
+  const price = quote ? quoteTotals(quote.items, quote.discount).total : null
   const f = proposalFigures(design, { price })
   const e = f.energy
   const a = f.assumptions
@@ -438,7 +438,7 @@ export async function exportProposalPdf({ job, quote = null, siteImage = null, p
       ['Valid until', quoteDaysLeft >= 1 ? shortDate(quote.validUntil) : shortDate(new Date(today.getTime() + validDays * 864e5))],
       ['Prepared by', preparedBy || COMPANY.name],
     ], W / 2 + 20, y, W / 2 - M - 20, { size: 9, gap: 16 })
-    const totals = quoteTotals(quote.items)
+    const totals = quoteTotals(quote.items, quote.discount)
     autoTable(doc, {
       startY: y + 84,
       margin: { left: M, right: M },
@@ -451,7 +451,15 @@ export async function exportProposalPdf({ job, quote = null, siteImage = null, p
     })
     y = doc.lastAutoTable.finalY + 18
     const tx = W / 2 + 40
-    y = rows([['Total before VAT', gbp(totals.subtotal, 2)], ['VAT', gbp(totals.vatTotal, 2)]], tx, y, W - M - tx, { size: 9.5 })
+    const d = quote.discount
+    y = rows([
+      ['Subtotal (ex VAT)', gbp(totals.subtotal, 2)],
+      ...(totals.discount > 0 ? [
+        ['Discount' + (d.type === 'percent' ? ' ' + Number(d.value) + '%' : '') + (d.reason ? ' (' + d.reason + ')' : ''), '-' + gbp(totals.discount, 2)],
+        ['Net after discount', gbp(totals.net, 2)],
+      ] : []),
+      ['VAT', gbp(totals.vatTotal, 2)],
+    ], tx, y, W - M - tx, { size: 9.5 })
     fill(BRAND, tx - 10, y - 4, W - M - tx + 10, 30, 6)
     text('Total including VAT', tx, y + 15, { size: 11, bold: true, colour: [255, 255, 255] })
     text(gbp(totals.total, 2), W - M - 8, y + 15, { size: 12, bold: true, colour: [255, 255, 255], align: 'right' })

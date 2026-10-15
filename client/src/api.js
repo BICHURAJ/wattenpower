@@ -67,21 +67,37 @@ export const lineAmounts = (item) => {
   return { net, vat, total: round2(net + vat) };
 };
 
+/** The discount in pounds for lines coming to `subtotal` (ex VAT). Same as server/src/quoteMath.js. */
+export const discountAmount = (subtotal, discount) => {
+  const value = Number(discount?.value) || 0;
+  if (!["percent", "amount"].includes(discount?.type) || value <= 0 || subtotal <= 0) return 0;
+  return round2(discount.type === "percent" ? subtotal * (Math.min(value, 100) / 100) : Math.min(value, subtotal));
+};
+
 /**
- * Quotation totals, worked out the same way as the server's recalculate(), so
- * the line totals (each including VAT) add up exactly to the total.
+ * Quotation totals, worked out exactly as the server does (server/src/quoteMath.js;
+ * both run the same test cases): { subtotal, discount, net, vatTotal, total }.
+ * A discount is shared across the lines by value, and each line's VAT is on
+ * its discounted price, since quotes mix 20% and 0% VAT lines.
  */
-export const quoteTotals = (items = []) => {
-  let subtotal = 0;
+export const quoteTotals = (items = [], discount) => {
+  const nets = items.map((item) => lineAmounts(item).net);
+  const subtotal = round2(nets.reduce((a, b) => a + b, 0));
+  const off = discountAmount(subtotal, discount);
+  const last = nets.reduce((at, n, i) => (n > 0 ? i : at), -1);
+  let given = 0;
   let vatTotal = 0;
-  for (const item of items) {
-    const { net, vat } = lineAmounts(item);
-    subtotal += net;
-    vatTotal += vat;
-  }
-  subtotal = round2(subtotal);
+  items.forEach((item, i) => {
+    let share = 0;
+    if (off && nets[i] > 0) {
+      share = i === last ? round2(off - given) : round2((off * nets[i]) / subtotal);
+      given = round2(given + share);
+    }
+    vatTotal += round2((nets[i] - share) * ((Number(item.vat) || 0) / 100));
+  });
   vatTotal = round2(vatTotal);
-  return { subtotal, vatTotal, total: round2(subtotal + vatTotal) };
+  const net = round2(subtotal - off);
+  return { subtotal, discount: off, net, vatTotal, total: round2(net + vatTotal) };
 };
 
 export const shortDate = (value) =>

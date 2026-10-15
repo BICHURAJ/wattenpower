@@ -114,7 +114,7 @@ function InstallationCard({ install, where, locating, base, onOpen, onDelete, de
           <span className="line-clamp-2">{address || 'No address'}</span>
         </p>
         <p className="text-xs text-slate-500 truncate">
-          {install.engineer?.name || <span className="text-slate-400">Unassigned</span>}
+          {install.engineer?.name || install.engineerName || <span className="text-slate-400">Unassigned</span>}
           {normaliseProducts(install.products).includes('solar') && kWp ? ' · ' + kWp + ' kWp' : ''}
           {install.design?.batteryKwh && normaliseProducts(install.products).includes('battery') ? ' · ' + install.design.batteryKwh + ' kWh' : ''}
           {install.chargerModel && normaliseProducts(install.products).includes('ev') ? ' · ' + install.chargerModel : ''}
@@ -210,7 +210,7 @@ export function InstallationsList() {
     { key: 'site', header: 'Site' },
     { key: 'installDate', header: 'Install Date', render: (r) => shortDate(r.installDate) },
     { key: 'status', header: 'Status', render: (r) => <Badge>{r.status}</Badge> },
-    { key: 'engineer', header: 'Engineer', render: (r) => r.engineer?.name || <span className="text-slate-400">Unassigned</span> },
+    { key: 'engineer', header: 'Engineer', render: (r) => r.engineer?.name || r.engineerName || <span className="text-slate-400">Unassigned</span> },
     {
       key: 'actions', header: 'Actions',
       render: (r) => (
@@ -741,7 +741,7 @@ export function InstallationDetails() {
                     : <span className="text-slate-400">Not linked</span>}
                   {install.quotation && <span className="ml-1.5"><Badge>{install.quotation.status}</Badge></span>}
                 </Row>
-                <Row label="Engineer">{install.engineer?.name || 'Unassigned'}</Row>
+                <Row label="Engineer">{install.engineer?.name || install.engineerName || 'Unassigned'}</Row>
                 <Row label="Site">{install.site || '--'}</Row>
                 <Row label="Install Date">{shortDate(install.installDate)}</Row>
                 <Row label="Supply Type">{install.supplyType}</Row>

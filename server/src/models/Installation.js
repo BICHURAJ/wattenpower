@@ -39,6 +39,8 @@ const InstallationSchema = new mongoose.Schema({
     default: 'Scheduled',
   },
   engineer: { type: mongoose.Schema.Types.ObjectId, ref: 'Engineer' },
+  // The engineer's name, kept when they're deleted so past jobs still show who did the work.
+  engineerName: String,
   // What's being installed: any mix of EV charger, solar PV and battery (see processes.js).
   products: { type: [{ type: String, enum: PRODUCT_KEYS }], default: ['ev'] },
   // Solar / battery system, copied from the quotation and then kept as-built.
@@ -90,9 +92,10 @@ const InstallationSchema = new mongoose.Schema({
   },
 }, { timestamps: true })
 
-// A completed site survey is final: once ticked it cannot be unticked.
+// A completed site survey is final: once ticked it cannot be unticked by hand --
+// only by reopening the survey (POST /site-surveys/:id/reopen).
 InstallationSchema.pre('validate', function (next) {
-  if (!this.isNew && this.isModified('progress.siteSurveyCompleted') && !stepDone(this.progress, 'siteSurveyCompleted')) {
+  if (!this.isNew && !this.$locals.reopenSurvey && this.isModified('progress.siteSurveyCompleted') && !stepDone(this.progress, 'siteSurveyCompleted')) {
     this.invalidate('progress.siteSurveyCompleted', 'The site survey is already completed and cannot be undone.')
   }
   next()

@@ -93,7 +93,7 @@ export async function exportSurveyPdf({ survey, photos = [] }) {
   const facts = [
     ['Status', survey.status],
     ['Visit', survey.scheduledAt ? new Date(survey.scheduledAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }) : '--'],
-    ['Surveyor', survey.surveyor?.name || job.engineer?.name || '--'],
+    ['Surveyor', survey.surveyor?.name || job.engineer?.name || job.engineerName || '--'],
     ['Completed', completed && survey.completedAt ? shortDate(survey.completedAt) + (survey.completedBy ? ' by ' + survey.completedBy : '') : 'Not yet'],
     ['Covered', survey.legacy ? '--' : progress.percent + '% (' + progress.done + ' of ' + progress.total + ')'],
     ['Needs action', progress.issues.length ? progress.issues.length + ' item(s)' : 'None'],

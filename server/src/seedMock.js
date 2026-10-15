@@ -9,6 +9,8 @@ import Installation from './models/Installation.js'
 import Certification from './models/Certification.js'
 import Ticket from './models/Ticket.js'
 import Grant from './models/Grant.js'
+import SiteSurvey from './models/SiteSurvey.js'
+import SitePhoto from './models/SitePhoto.js'
 import { stepsFor } from './processes.js'
 
 // Adds a realistic batch of mock data on top of what is already there:
@@ -284,9 +286,13 @@ async function clearMock() {
     Quotation.deleteMany({ client: { $in: clientIds } }),
     Client.deleteMany({ _id: { $in: clientIds } }),
     Engineer.deleteMany({ email: { $regex: MOCK_DOMAIN.replace(/\./g, '\\.') + '$' } }),
+    // Each mock job's site survey and photos (survey to handover) go with it.
+    SiteSurvey.deleteMany({ installation: { $in: installIds } }),
+    SitePhoto.deleteMany({ installation: { $in: installIds } }),
   ])
   console.log('[mock] removed ' + clientIds.length + ' clients, ' + results[4].deletedCount + ' quotations, ' +
-    installIds.length + ' installations, ' + results[0].deletedCount + ' certificates and ' + engineers + ' engineers')
+    installIds.length + ' installations, ' + results[7].deletedCount + ' site surveys, ' + results[8].deletedCount + ' photos, ' +
+    results[0].deletedCount + ' certificates and ' + engineers + ' engineers')
 }
 
 // --- Create ------------------------------------------------------------------------------

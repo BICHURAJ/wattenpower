@@ -685,6 +685,21 @@ export function Engineers() {
   const performance = useFetch('/engineers/report')
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState('')
+  // Deleting engineers: admins only (the server checks the role too).
+  const isAdmin = user?.role === 'admin'
+  const [deletingId, setDeletingId] = useState(null)
+  const [notice, setNotice] = useState('')
+  const removeEngineer = async (engineer) => {
+    if (!window.confirm('Delete engineer ' + engineer.name + '?\n\nTheir past jobs keep their name. This cannot be undone.')) return
+    setExportError('')
+    setNotice('')
+    setDeletingId(engineer._id)
+    try {
+      await api.del('/engineers/' + engineer._id)
+      setNotice(engineer.name + ' deleted.')
+      reload()
+    } catch (err) { setExportError(err.message) } finally { setDeletingId(null) }
+  }
   const exportReport = async () => {
     setExporting(true)
     setExportError('')
@@ -716,6 +731,7 @@ export function Engineers() {
       </PageHeader>
       <Banner>{error}</Banner>
       <Banner onDismiss={() => setExportError('')}>{exportError}</Banner>
+      <Banner kind="success" onDismiss={() => setNotice('')}>{notice}</Banner>
 
       <div className="mb-4 inline-flex gap-0.5 rounded-lg bg-white p-1 ring-1 ring-slate-100 shadow-soft">
         {['Team', 'Performance'].map((v) => (
@@ -803,8 +819,18 @@ export function Engineers() {
                 </div>
               )}
 
-              <div className="mt-auto pt-4">
-                {can('engineers', 'update') && <button className="btn-secondary w-full justify-center px-3 py-2 text-xs" onClick={() => setEditing(engineer)}>Edit details &amp; availability</button>}
+              <div className="mt-auto pt-4 flex gap-2">
+                {can('engineers', 'update') && <button className="btn-secondary flex-1 justify-center px-3 py-2 text-xs" onClick={() => setEditing(engineer)}>Edit details &amp; availability</button>}
+                {isAdmin && (
+                  <button
+                    className="btn-secondary justify-center px-3 py-2 text-xs text-red-600 hover:bg-red-50 hover:border-red-200 disabled:opacity-50"
+                    disabled={deletingId === engineer._id}
+                    title={'Delete ' + engineer.name}
+                    onClick={() => removeEngineer(engineer)}
+                  >
+                    {deletingId === engineer._id ? 'Deleting...' : 'Delete'}
+                  </button>
+                )}
               </div>
             </Card>
           )

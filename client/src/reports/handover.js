@@ -130,7 +130,7 @@ export async function exportHandoverPdf({ install, handover, photos = [], prepar
     products.includes('battery') && ['Battery', [design.batteryMake, design.batteryModel, design.batteryKwh && design.batteryKwh + ' kWh'].filter(Boolean).join(' ') || '--'],
     products.includes('ev') && ['EV charger', answers.evCharger || install.chargerModel || '--'],
     ['Installed', install.installDate ? shortDate(install.installDate) : '--'],
-    ['Engineer', install.engineer?.name || '--'],
+    ['Engineer', install.engineer?.name || install.engineerName || '--'],
     ['Handed over', completed ? shortDate(handover.completedAt) : 'Not yet'],
   ].filter(Boolean)
   let ry = y + 17

@@ -226,7 +226,7 @@ function ProposalCard({ job, values, estimate, editable, onChange, canSeePrice, 
     return () => { cancelled = true }
   }, [canSeePrice, quoteId])
 
-  const price = quote ? quoteTotals(quote.items).total : null
+  const price = quote ? quoteTotals(quote.items, quote.discount).total : null
   const design = { ...values, estimatedAnnualKwh: estimate }
   const f = estimate ? proposalFigures(design, { price }) : null
   const set = (key) => (e) => onChange({ ...values, [key]: e.target.value })

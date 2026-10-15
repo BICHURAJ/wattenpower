@@ -4,14 +4,17 @@ export const BRAND = [0, 106, 253] // logo blue #006AFD
 export const BRAND_DARK = [0, 71, 174]
 export const ACCENT = [128, 221, 55] // logo green #80DD37
 
-let logoPromise
+const imageCache = new Map()
 
 /** Loads /logo.png once as a data URL (plus its size) for doc.addImage. */
-export function loadLogo() {
-  if (!logoPromise) {
-    logoPromise = fetch('/logo.png')
+export const loadLogo = () => loadImage('/logo.png')
+
+/** Loads an image from /public once as { dataUrl, width, height }, or null if it can't be read. */
+export function loadImage(path) {
+  if (!imageCache.has(path)) {
+    const logoPromise = fetch(path)
       .then((res) => {
-        if (!res.ok) throw new Error('logo ' + res.status)
+        if (!res.ok) throw new Error(path + ' ' + res.status)
         return res.blob()
       })
       .then((blob) => new Promise((resolve, reject) => {
@@ -25,10 +28,11 @@ export function loadLogo() {
         reader.onerror = reject
         reader.readAsDataURL(blob)
       }))
-      // A missing logo should never stop an export -- fall back to text.
-      .catch(() => { logoPromise = undefined; return null })
+      // A missing logo should never stop an export -- fall back to text (and try again next time).
+      .catch(() => { imageCache.delete(path); return null })
+    imageCache.set(path, logoPromise)
   }
-  return logoPromise
+  return imageCache.get(path)
 }
 
 /**

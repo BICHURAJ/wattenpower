@@ -96,6 +96,27 @@ router.get('/:id', async (req, res, next) => {
   } catch (err) { next(err) }
 })
 
+// Delete a quotation. An installation job linked to it keeps its quote as a
+// record, so a quote with a job is refused -- unlink it on the job, or mark the
+// quote Declined or Expired instead. Needs the delete right on quotations
+// (admins, or users given full access to the Quotations tab).
+router.delete('/:id', async (req, res, next) => {
+  try {
+    const quote = await Quotation.findById(req.params.id).populate('client', 'name')
+    if (!quote) return res.status(404).json({ error: 'Quotation not found' })
+    const jobs = await Installation.find({ quotation: quote._id }).select('installNo').lean()
+    if (jobs.length) {
+      return res.status(409).json({
+        error: quote.quoteNo + ' is linked to installation ' + jobs.map((j) => j.installNo).join(', ') +
+          ', so it cannot be deleted. Unlink it on the job first, or set the quote to Declined or Expired instead.',
+      })
+    }
+    await quote.deleteOne()
+    await Activity.create({ type: 'quotation', text: 'Quotation ' + quote.quoteNo + ' deleted' + (quote.client?.name ? ' (' + quote.client.name + ')' : ''), by: req.user?.name })
+    res.json({ ok: true })
+  } catch (err) { next(err) }
+})
+
 router.use('/', crudRouter(Quotation, {
   // Every word must match the quote, its items, products, client or linked jobs (installationSearch.js).
   search: quotationSearch,

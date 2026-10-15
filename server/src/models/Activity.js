@@ -4,7 +4,7 @@ import { currentUser } from '../requestContext.js'
 // Feeds the "Recent Activities" panel on the dashboard (screen 2).
 const ActivitySchema = new mongoose.Schema({
   text: { type: String, required: true },
-  type: { type: String, enum: ['quotation', 'installation', 'ticket', 'grant', 'client', 'lead', 'compliance'], default: 'client' },
+  type: { type: String, enum: ['quotation', 'installation', 'ticket', 'grant', 'client', 'lead', 'compliance', 'engineer'], default: 'client' },
   refId: mongoose.Schema.Types.ObjectId,
   by: String,
   // Who did it. Admins see everyone's activity; other users see their own.

@@ -8,6 +8,7 @@ import {
 import { exportQuotationPdf } from '../reports/quotation'
 import { useAuth } from '../auth'
 import { normaliseProducts, ProductChips, ProductPicker } from '../processes'
+import { quoteTemplate } from '../quoteTemplates'
 
 const STATUSES = ['All', 'Draft', 'Sent', 'Accepted', 'Declined', 'Expired']
 
@@ -15,11 +16,14 @@ const STATUSES = ['All', 'Draft', 'Sent', 'Accepted', 'Declined', 'Expired']
 // batteries are 0% VAT in the UK (energy-saving materials, until March 2027);
 // EV chargers are standard rate.
 const DEFAULT_ITEMS = {
-  ev: { description: 'EV Charger Installation', qty: 1, unitPrice: 1000, vat: 20 },
+  ev: [
+    { description: 'Ohme EV Charger - 7 kW', qty: 1, unitPrice: 750, vat: 20 },
+    { description: 'Standard Installation and Commissioning', qty: 1, unitPrice: 300, vat: 20 },
+  ],
   solar: { description: 'Solar PV system - supply & installation', qty: 1, unitPrice: 5500, vat: 0 },
   battery: { description: 'Battery storage - supply & installation', qty: 1, unitPrice: 4000, vat: 0 },
 }
-const defaultItems = (products) => normaliseProducts(products).map((p) => ({ ...DEFAULT_ITEMS[p] }))
+const defaultItems = (products) => normaliseProducts(products).flatMap((p) => [].concat(DEFAULT_ITEMS[p]).map((item) => ({ ...item })))
 
 const DownloadIcon = () => (
   <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
@@ -32,6 +36,21 @@ const EditIcon = () => (
     <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
   </svg>
 )
+
+const TrashIcon = () => (
+  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+    <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" />
+  </svg>
+)
+
+/** Asks, then deletes a quotation. Resolves true if it was deleted. */
+async function confirmAndDelete(quote) {
+  const who = quote.client?.name ? ' for ' + quote.client.name : ''
+  const accepted = quote.status === 'Accepted' ? '\n\nThis quote was accepted by the customer.' : ''
+  if (!window.confirm('Delete quotation ' + quote.quoteNo + who + '?' + accepted + '\n\nThis cannot be undone.')) return false
+  await api.del('/quotations/' + quote._id)
+  return true
+}
 
 /** Tracks which quotation is being turned into a PDF, and any failure. */
 function usePdfExport() {
@@ -63,9 +82,21 @@ export function QuotationsList() {
   const [status, setStatus] = useState('All')
   const [page, setPage] = useState(1)
   const navigate = useNavigate()
-  const { data, loading, error } = useFetch('/quotations' + qs({ q: query, status, page }))
+  const { data, loading, error, reload } = useFetch('/quotations' + qs({ q: query, status, page }))
   const { busyId, pdfError, setPdfError, download } = usePdfExport()
   const { can } = useAuth()
+  const canDelete = can('quotations', 'delete')
+  const [deletingId, setDeletingId] = useState(null)
+  const [actionError, setActionError] = useState('')
+  const [notice, setNotice] = useState('')
+  const remove = async (row) => {
+    setActionError('')
+    setNotice('')
+    setDeletingId(row._id)
+    try {
+      if (await confirmAndDelete(row)) { setNotice('Quotation ' + row.quoteNo + ' deleted.'); reload() }
+    } catch (err) { setActionError(err.message) } finally { setDeletingId(null) }
+  }
 
   const columns = [
     { key: 'quoteNo', header: 'Quote No.', render: (r) => <span className="font-medium text-slate-900">{r.quoteNo}</span> },
@@ -93,6 +124,16 @@ export function QuotationsList() {
           >
             <DownloadIcon /> {busyId === r._id ? '...' : 'PDF'}
           </button>
+          {canDelete && (
+            <button
+              className="inline-flex items-center gap-1 text-sm text-slate-400 hover:text-red-600 disabled:opacity-50"
+              disabled={deletingId === r._id}
+              title={'Delete ' + r.quoteNo}
+              onClick={(e) => { e.stopPropagation(); remove(r) }}
+            >
+              <TrashIcon /> {deletingId === r._id ? 'Deleting...' : 'Delete'}
+            </button>
+          )}
         </span>
       ),
     },
@@ -106,6 +147,8 @@ export function QuotationsList() {
 
       <Banner>{error}</Banner>
       <Banner onDismiss={() => setPdfError('')}>{pdfError}</Banner>
+      <Banner onDismiss={() => setActionError('')}>{actionError}</Banner>
+      <Banner kind="success" onDismiss={() => setNotice('')}>{notice}</Banner>
 
       <Card bodyClass="">
         <div className="flex flex-wrap gap-2 p-4 border-b border-slate-200">
@@ -161,24 +204,46 @@ function QuotationForm({ quote }) {
         notes: quote.notes || '',
         status: quote.status,
         products: normaliseProducts(quote.products),
+        // Quotes from before the template get its wording when next edited.
+        title: quote.title || quoteTemplate(quote.products).title,
+        worksDescription: quote.worksDescription || quoteTemplate(quote.products).works,
+        paymentTerms: quote.paymentTerms || quoteTemplate(quote.products).paymentTerms,
+        showLinePrices: Boolean(quote.showLinePrices),
       }
     : {
         client: '', site: '', quoteDate: inputDate(new Date()), validUntil: '', reference: '',
         financeOption: 'Pay in Full', notes: '', products: ['ev'],
+        title: quoteTemplate(['ev']).title,
+        worksDescription: quoteTemplate(['ev']).works,
+        paymentTerms: quoteTemplate(['ev']).paymentTerms,
+        showLinePrices: false,
       }))
+  // The wording follows the chosen products until someone edits it.
+  const wordingEdited = useRef(editing)
   const [items, setItems] = useState(() => (editing
     ? quote.items.map(({ description, qty, unitPrice, vat }) => ({ description, qty, unitPrice, vat }))
     : defaultItems(['ev'])))
+  // Optional discount on the whole quote: { type: '' | 'percent' | 'amount', value, reason }.
+  const [discount, setDiscount] = useState(() => ({
+    type: quote?.discount?.type || '',
+    value: quote?.discount?.value ? String(quote.discount.value) : '',
+    reason: quote?.discount?.reason || '',
+  }))
+  const discountPayload = () => (discount.type
+    ? { type: discount.type, value: Number(discount.value) || 0, reason: discount.reason.trim() }
+    : { type: '', value: 0, reason: '' })
   // On a new quote, the lines follow the chosen products until someone edits them.
   const itemsEdited = useRef(editing)
   const chooseProducts = (products) => {
-    setForm((f) => ({ ...f, products }))
+    const t = quoteTemplate(products)
+    setForm((f) => ({ ...f, products, ...(!wordingEdited.current && { title: t.title, worksDescription: t.works }) }))
     if (!itemsEdited.current) setItems(defaultItems(products))
   }
   // The system design isn't part of the quote: the engineer designs it on the job (MCS).
   const productFields = () => ({ products: normaliseProducts(form.products) })
 
   const set = (key) => (e) => setForm({ ...form, [key]: e.target.value })
+  const setWording = (key) => (e) => { wordingEdited.current = true; setForm({ ...form, [key]: e.target.value }) }
 
   const updateItem = (index, key, value) => {
     itemsEdited.current = true
@@ -189,14 +254,14 @@ function QuotationForm({ quote }) {
 
   // Totals are shown live here and recalculated again on the server on save,
   // so what the client sees and what gets stored can never drift apart.
-  const { subtotal, vatTotal, total } = quoteTotals(items)
+  const totals = quoteTotals(items, discountPayload())
 
   const save = async (status) => {
     if (!form.client) { setError('Please choose a client first.'); return }
     setBusy(true)
     setError('')
     try {
-      const quote = await api.post('/quotations', { ...form, ...productFields(), items, status: 'Draft' })
+      const quote = await api.post('/quotations', { ...form, ...productFields(), items, discount: discountPayload(), status: 'Draft' })
       if (status === 'Sent') await api.post('/quotations/' + quote._id + '/send')
       navigate('/quotations/' + quote._id)
     } catch (err) { setError(err.message) } finally { setBusy(false) }
@@ -215,6 +280,7 @@ function QuotationForm({ quote }) {
         ...productFields(),
         validUntil: fields.validUntil || null,
         items,
+        discount: discountPayload(),
         // Draft / Expired have no workflow step, so they are set directly.
         ...(statusChanged && !action && { status }),
       })
@@ -291,6 +357,34 @@ function QuotationForm({ quote }) {
           )}
         </Card>
 
+        <Card title="Quotation document" subtitle="Wording on the PDF, from the template for what's being quoted">
+          <div className="space-y-4">
+            <Field label="Headline (shown with the total)">
+              <input className="input" value={form.title} maxLength={120} onChange={setWording('title')} />
+            </Field>
+            <Field label="Description of works">
+              <textarea className="input min-h-[140px]" value={form.worksDescription} maxLength={4000} onChange={setWording('worksDescription')} />
+            </Field>
+            <div className="grid sm:grid-cols-2 gap-4 items-end">
+              <Field label="Payment terms">
+                <input className="input" value={form.paymentTerms} maxLength={300} onChange={set('paymentTerms')} />
+              </Field>
+              <label className="flex items-center gap-2 text-sm text-slate-600 pb-2">
+                <input type="checkbox" className="rounded border-slate-300" checked={form.showLinePrices}
+                  onChange={(e) => setForm({ ...form, showLinePrices: e.target.checked })} />
+                Show line prices on the PDF
+              </label>
+            </div>
+            <button type="button" className="text-xs text-brand-600 hover:underline" onClick={() => {
+              const t = quoteTemplate(form.products)
+              wordingEdited.current = false
+              setForm({ ...form, title: t.title, worksDescription: t.works, paymentTerms: t.paymentTerms })
+            }}>
+              Reset to the template wording
+            </button>
+          </div>
+        </Card>
+
         <Card title="Items">
           {/* Phones: each line is its own block, with the fields on two rows. */}
           <div className="sm:overflow-x-auto">
@@ -340,14 +434,9 @@ function QuotationForm({ quote }) {
           </div>
           <button className="btn-ghost mt-2 px-0 text-brand-600" onClick={() => { itemsEdited.current = true; setItems([...items, blankItem()]) }}>+ Add Item</button>
 
-          <div className="mt-4 pt-4 border-t border-slate-200 flex justify-end">
-            <dl className="w-full sm:w-64 space-y-1.5 text-sm">
-              <div className="flex justify-between"><dt className="text-slate-500">Subtotal</dt><dd>{money(subtotal)}</dd></div>
-              <div className="flex justify-between"><dt className="text-slate-500">VAT</dt><dd>{money(vatTotal)}</dd></div>
-              <div className="flex justify-between pt-1.5 border-t border-slate-200 font-semibold text-slate-900">
-                <dt>Total</dt><dd>{money(total)}</dd>
-              </div>
-            </dl>
+          <div className="mt-4 pt-4 border-t border-slate-200 flex flex-wrap items-start justify-between gap-6">
+            <DiscountFields value={discount} onChange={setDiscount} subtotal={totals.subtotal} />
+            <QuoteTotalsList totals={totals} discount={discountPayload()} />
           </div>
         </Card>
 
@@ -378,11 +467,21 @@ export function QuotationDetails() {
   const { busyId, pdfError, setPdfError, download } = usePdfExport()
   const { can } = useAuth()
   const canEdit = can('quotations', 'update')
+  const [deleting, setDeleting] = useState(false)
 
   if (loading) return <Loading />
   if (!quote) return <Banner>Quotation not found.</Banner>
   // Worked out from the lines so they always add up, even on quotes saved before line totals included VAT.
-  const totals = quoteTotals(quote.items)
+  const totals = quoteTotals(quote.items, quote.discount)
+
+  const linkedJobs = quote.installations || []
+  const remove = async () => {
+    setError('')
+    setDeleting(true)
+    try {
+      if (await confirmAndDelete(quote)) navigate('/quotations')
+    } catch (err) { setError(err.message) } finally { setDeleting(false) }
+  }
 
   const act = async (action) => {
     try {
@@ -405,6 +504,16 @@ export function QuotationDetails() {
         <button className="btn-secondary" onClick={() => download(quote)} disabled={busyId === quote._id}>
           <DownloadIcon /> {busyId === quote._id ? 'Preparing...' : 'Download PDF'}
         </button>
+        {can('quotations', 'delete') && (
+          <button
+            className="btn-secondary text-red-600 hover:bg-red-50 hover:border-red-200 disabled:text-slate-400"
+            onClick={remove}
+            disabled={deleting || linkedJobs.length > 0}
+            title={linkedJobs.length ? 'Linked to installation ' + linkedJobs.map((j) => j.installNo).join(', ') + ' -- unlink it on the job first, or mark the quote Declined or Expired' : 'Delete this quotation'}
+          >
+            <TrashIcon /> {deleting ? 'Deleting...' : 'Delete'}
+          </button>
+        )}
         {canEdit && quote.status === 'Draft' && <button className="btn-primary" onClick={() => act('send')}>Send Quotation</button>}
         {canEdit && quote.status === 'Sent' && (
           <>
@@ -476,13 +585,7 @@ export function QuotationDetails() {
               </table>
               </div>
               <div className="mt-4 pt-3 border-t border-slate-200 flex justify-end">
-                <dl className="w-full sm:w-64 space-y-1.5 text-sm">
-                  <div className="flex justify-between"><dt className="text-slate-500">Subtotal</dt><dd>{money(totals.subtotal)}</dd></div>
-                  <div className="flex justify-between"><dt className="text-slate-500">VAT</dt><dd>{money(totals.vatTotal)}</dd></div>
-                  <div className="flex justify-between pt-1.5 border-t border-slate-200 font-semibold text-slate-900">
-                    <dt>Total</dt><dd>{money(totals.total)}</dd>
-                  </div>
-                </dl>
+                <QuoteTotalsList totals={totals} discount={quote.discount} />
               </div>
             </>
           )}
@@ -527,3 +630,72 @@ const Row = ({ label, children }) => (
     <dd className="min-w-0 text-slate-800 text-right break-words">{children}</dd>
   </div>
 )
+
+/** "10% (Loyalty)" / "£250 (Price match)" -- how a discount is described on screen and in PDFs. */
+export function discountLabel(discount) {
+  if (!discount?.type || !Number(discount.value)) return ''
+  const what = discount.type === 'percent' ? Number(discount.value) + '%' : money(discount.value)
+  return what + (discount.reason ? ' (' + discount.reason + ')' : '')
+}
+
+/** Subtotal, discount, net, VAT and total, as on the quote and the PDF. */
+function QuoteTotalsList({ totals, discount }) {
+  return (
+    <dl className="w-full sm:w-72 space-y-1.5 text-sm ml-auto">
+      <div className="flex justify-between"><dt className="text-slate-500">Subtotal (ex VAT)</dt><dd>{money(totals.subtotal)}</dd></div>
+      {totals.discount > 0 && (
+        <>
+          <div className="flex justify-between gap-3 text-emerald-700">
+            <dt className="min-w-0">Discount <span className="text-xs">{discountLabel(discount)}</span></dt>
+            <dd className="whitespace-nowrap">-{money(totals.discount)}</dd>
+          </div>
+          <div className="flex justify-between"><dt className="text-slate-500">Net after discount</dt><dd>{money(totals.net)}</dd></div>
+        </>
+      )}
+      <div className="flex justify-between"><dt className="text-slate-500">VAT</dt><dd>{money(totals.vatTotal)}</dd></div>
+      <div className="flex justify-between pt-1.5 border-t border-slate-200 font-semibold text-slate-900">
+        <dt>Total</dt><dd>{money(totals.total)}</dd>
+      </div>
+    </dl>
+  )
+}
+
+/** Discount on the whole quote: none, a percentage, or a fixed amount, with a reason. */
+function DiscountFields({ value, onChange, subtotal }) {
+  const set = (patch) => onChange({ ...value, ...patch })
+  const options = [['', 'No discount'], ['percent', '%'], ['amount', '£']]
+  const tooBig = value.type === 'percent' ? Number(value.value) > 100 : value.type === 'amount' && Number(value.value) > subtotal
+  return (
+    <div className="w-full sm:w-auto sm:min-w-[300px] max-w-md">
+      <p className="label">Discount</p>
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="inline-flex rounded-lg bg-slate-100 p-0.5">
+          {options.map(([key, label]) => (
+            <button key={key || 'none'} type="button" onClick={() => set({ type: key, value: key ? value.value : '' })}
+              className={'px-3 py-1.5 text-xs font-medium rounded-md ' + (value.type === key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500')}>
+              {label}
+            </button>
+          ))}
+        </div>
+        {value.type && (
+          <div className="relative w-28">
+            {value.type === 'amount' && <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">£</span>}
+            <input className={'input ' + (value.type === 'amount' ? 'pl-7' : 'pr-7')} type="number" min="0" step={value.type === 'percent' ? '0.5' : '0.01'}
+              max={value.type === 'percent' ? 100 : undefined} value={value.value} onChange={(e) => set({ value: e.target.value })} placeholder="0" />
+            {value.type === 'percent' && <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">%</span>}
+          </div>
+        )}
+      </div>
+      {value.type && (
+        <>
+          <input className="input mt-2" value={value.reason} maxLength={200} onChange={(e) => set({ reason: e.target.value })}
+            placeholder="Reason (shown on the quote), e.g. Loyalty discount" />
+          <p className={'mt-1 text-xs ' + (tooBig ? 'text-red-600' : 'text-slate-400')}>
+            {tooBig ? (value.type === 'percent' ? 'Up to 100%.' : 'More than the subtotal: it will be capped at ' + money(subtotal) + '.')
+              : 'Taken off before VAT, shared across the lines by value.'}
+          </p>
+        </>
+      )}
+    </div>
+  )
+}

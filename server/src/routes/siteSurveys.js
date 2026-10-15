@@ -6,6 +6,7 @@ import Installation from '../models/Installation.js'
 import Client from '../models/Client.js'
 import Activity from '../models/Activity.js'
 import { userCan } from '../permissions.js'
+import { stepsFor, stepDone } from '../processes.js'
 import { installationSearch } from '../installationSearch.js'
 import { surveySectionsFor, surveyProgress } from '../surveyChecklist.js'
 import { ensureSurvey, progressFor, refreshSurvey } from '../surveyService.js'
@@ -288,6 +289,45 @@ router.post('/:id/complete', async (req, res, next) => {
       await job.save()
     }
     await Activity.create({ type: 'installation', text: 'Site survey completed for ' + job.installNo, refId: job._id, by: req.user.name })
+    res.json(await surveyView(survey))
+  } catch (err) { next(err) }
+})
+
+// Reopen a completed survey to correct it: answers and photos stay, it unlocks,
+// and the job's "Site / roof survey" step is unticked. Engineers and admins
+// (the same right as completing it). Refused when later steps on the job are
+// done, so the steps never end up out of order.
+router.post('/:id/reopen', async (req, res, next) => {
+  try {
+    if (!userCan(req.user, 'installationProgress', 'update')) {
+      return res.status(403).json({ error: 'Only engineers and admins can reopen a site survey.' })
+    }
+    const survey = await loadSurvey(req.params.id)
+    if (!survey) return res.status(404).json({ error: 'Survey not found' })
+    if (survey.status !== 'Completed') return res.json(await surveyView(survey))
+    const job = await Installation.findById(survey.installation)
+    if (!job) return res.status(404).json({ error: 'Installation not found' })
+    if (job.status === 'On Hold') return res.status(409).json({ error: 'This job is on hold. Resume it before reopening the survey.' })
+
+    if (job.progress.get('siteSurveyCompleted')) {
+      // Hand-ticked steps after the survey (the quote step follows the quote, so it doesn't count).
+      const later = stepsFor(job.products).filter((s) => s.key !== 'siteSurveyCompleted' && !s.fromQuote && stepDone(job.progress, s.key))
+      if (later.length || job.status === 'Completed') {
+        return res.status(409).json({
+          error: 'Later steps on ' + job.installNo + ' are already done (' + (later.map((s) => s.label).join(', ') || 'job completed') +
+            '), so the survey can\'t be reopened. Untick them first.',
+        })
+      }
+      job.progress.set('siteSurveyCompleted', false)
+      job.$locals.reopenSurvey = true
+      await job.save()
+    }
+    survey.status = 'In progress'
+    survey.completedAt = undefined
+    survey.completedBy = undefined
+    survey.legacy = false
+    await refreshSurvey(survey, job)
+    await Activity.create({ type: 'installation', text: 'Site survey reopened for ' + job.installNo, refId: job._id, by: req.user.name })
     res.json(await surveyView(survey))
   } catch (err) { next(err) }
 })

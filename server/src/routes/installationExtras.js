@@ -263,7 +263,7 @@ router.post('/:id/handover/complete', async (req, res, next) => {
 router.get('/report', async (req, res, next) => {
   try {
     const jobs = await Installation.find({ ...(await Client.activeOnly()) })
-      .select('installNo client engineer products status installDate completedAt progress hold postcode address handover.completedAt dno')
+      .select('installNo client engineer engineerName products status installDate completedAt progress hold postcode address handover.completedAt dno')
       .populate('client', 'name postcode')
       .populate('engineer', 'name')
       .lean()
@@ -302,7 +302,7 @@ router.get('/report', async (req, res, next) => {
       status: j.status,
       installDate: j.installDate || null,
       completedAt: j.completedAt || null,
-      engineer: j.engineer?.name || null,
+      engineer: j.engineer?.name || j.engineerName || null,
       stage: j.status === 'Completed' ? 'Completed' : stageOf(j),
       holdReason: j.hold?.reason || null,
       holdSince: j.hold?.since || null,
@@ -328,7 +328,7 @@ router.get('/report', async (req, res, next) => {
 
     const people = new Map()
     for (const j of live) {
-      const name = j.engineer?.name || 'Unassigned'
+      const name = j.engineer?.name || j.engineerName || 'Unassigned'
       if (!people.has(name)) people.set(name, { name, scheduled: 0, inProgress: 0, onHold: 0, completed: 0, overdue: 0, upcoming: 0 })
       const p = people.get(name)
       if (j.status === 'Scheduled') p.scheduled++

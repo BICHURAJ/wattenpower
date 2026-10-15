@@ -27,6 +27,7 @@ import Tool from '../models/Tool.js'
 import Activity from '../models/Activity.js'
 import Installation from '../models/Installation.js'
 import Quotation from '../models/Quotation.js'
+import SiteSurvey from '../models/SiteSurvey.js'
 import { clientSearch } from '../installationSearch.js'
 
 const router = express.Router()
@@ -129,6 +130,42 @@ router.post('/leads/:id/convert', requirePermission('clients', 'create'), async 
 
 // Engineers analytics (Engineers page and PDF report), before the /:id routes.
 router.get('/engineers/report', engineerReport)
+
+// Delete an engineer: admins only (by role -- tab access can't grant it).
+// Refused while they still have live work, which must be reassigned first.
+// Their past jobs keep their name (engineerName), so history still shows who
+// did the work; task assignments and their van are freed up.
+router.delete('/engineers/:id', async (req, res, next) => {
+  try {
+    if (req.user?.role !== 'admin') return res.status(403).json({ error: 'Only admins can delete engineers.' })
+    const engineer = await Engineer.findById(req.params.id)
+    if (!engineer) return res.status(404).json({ error: 'Engineer not found' })
+
+    const [activeJobs, openTickets, openSurveys] = await Promise.all([
+      Installation.find({ engineer: engineer._id, status: { $in: ['Scheduled', 'In Progress', 'On Hold'] } }).select('installNo').lean(),
+      Ticket.find({ assignedTo: engineer._id, status: { $ne: 'Closed' } }).select('ticketNo').lean(),
+      SiteSurvey.find({ surveyor: engineer._id, status: { $ne: 'Completed' } }).populate('installation', 'installNo').lean(),
+    ])
+    const blockers = [
+      activeJobs.length && activeJobs.length + ' active job' + (activeJobs.length === 1 ? '' : 's') + ' (' + activeJobs.map((j) => j.installNo).join(', ') + ')',
+      openTickets.length && openTickets.length + ' open ticket' + (openTickets.length === 1 ? '' : 's') + ' (' + openTickets.map((t) => t.ticketNo).join(', ') + ')',
+      openSurveys.length && openSurveys.length + ' unfinished survey' + (openSurveys.length === 1 ? '' : 's') + ' (' + openSurveys.map((s) => s.installation?.installNo).filter(Boolean).join(', ') + ')',
+    ].filter(Boolean)
+    if (blockers.length) {
+      return res.status(409).json({ error: engineer.name + ' still has ' + blockers.join(', ') + '. Reassign them first, then delete.' })
+    }
+
+    await Promise.all([
+      // Past jobs remember who did them.
+      Installation.updateMany({ engineer: engineer._id }, { $set: { engineerName: engineer.name } }),
+      Installation.updateMany({ 'tasks.assignedTo': engineer._id }, { $unset: { 'tasks.$[t].assignedTo': '' } }, { arrayFilters: [{ 't.assignedTo': engineer._id }] }),
+      Van.updateMany({ engineer: engineer._id }, { $unset: { engineer: '' } }),
+    ])
+    await engineer.deleteOne()
+    await Activity.create({ type: 'engineer', text: 'Engineer ' + engineer.name + ' deleted', by: req.user.name })
+    res.json({ ok: true })
+  } catch (err) { next(err) }
+})
 router.use('/engineers', crudRouter(Engineer, { searchFields: ['name', 'email'], defaultSort: 'name' }))
 
 router.use('/tickets', crudRouter(Ticket, {

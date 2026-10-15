@@ -343,6 +343,17 @@ export function SiteSurveyEditor() {
     } catch (err) { setError(err.message) }
   }
 
+  // Unlock a completed survey to correct it. Answers and photos stay; the job's
+  // survey step is unticked until it's completed again.
+  const reopen = async () => {
+    if (!window.confirm('Reopen this survey? It unlocks for changes (answers and photos are kept), and the job\'s "Site / roof survey" step is unticked until the survey is completed again.')) return
+    setError('')
+    try {
+      apply(await api.post('/site-surveys/' + id + '/reopen'))
+      setNotice('Survey reopened. Complete it again when it\'s up to date.')
+    } catch (err) { setError(err.message) }
+  }
+
   const complete = async () => {
     setError('')
     try {
@@ -416,9 +427,17 @@ export function SiteSurveyEditor() {
           </p>
         )}
         {locked && (
-          <p className="mt-3 text-xs text-slate-500">
-            {survey.legacy ? 'Survey completed. No checklist is on file for this job.' : 'Completed ' + shortDate(survey.completedAt) + (survey.completedBy ? ' by ' + survey.completedBy : '') + '. The survey is locked.'}
-          </p>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-slate-500">
+              {survey.legacy ? 'Survey completed. No checklist is on file for this job.' : 'Completed ' + shortDate(survey.completedAt) + (survey.completedBy ? ' by ' + survey.completedBy : '') + '. The survey is locked.'}
+            </p>
+            {canComplete && (
+              <button type="button" className="btn-secondary text-xs px-3 py-1.5" onClick={reopen}
+                title="Unlock the survey to correct it; answers and photos are kept">
+                Reopen survey
+              </button>
+            )}
+          </div>
         )}
         {!locked && job.status === 'On Hold' && <p className="mt-3 text-xs text-slate-500">The job is on hold, so the survey can't be completed until it's resumed.</p>}
         {!locked && !canComplete && <p className="mt-3 text-xs text-slate-500">An engineer completes the survey once everything is filled in.</p>}
